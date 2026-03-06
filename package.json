@@ -1,0 +1,43 @@
+{
+  "name": "mindlink-demo---ctb-junior",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"vite\"",
+    "server": "cd backend && npm run dev",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@fontsource/noto-sans-sc": "^5.2.9",
+    "@react-pdf/renderer": "^4.3.2",
+    "@react-three/drei": "9.102.0",
+    "@react-three/fiber": "8.16.1",
+    "buffer": "^6.0.3",
+    "earcut": "^3.0.2",
+    "framer-motion": "10.16.4",
+    "html-to-image": "^1.11.13",
+    "jspdf": "^4.0.0",
+    "lucide-react": "0.330.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "recharts": "2.12.0",
+    "three": "0.162.0",
+    "three-stdlib": "2.29.0",
+    "uuid": "9.0.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.18",
+    "@types/node": "^22.14.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react": "^4.2.0",
+    "autoprefixer": "^10.4.23",
+    "concurrently": "^8.2.2",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.18",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0"
+  }
+}

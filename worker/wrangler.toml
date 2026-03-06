@@ -1,0 +1,11 @@
+name = "mindlink-backend"
+main = "src/index.ts"
+compatibility_date = "2024-04-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "mindlink-db"
+database_id = "YOUR_DATABASE_ID_HERE" # Users replace this with their generated D1 database ID
+
+[observability]
+enabled = true

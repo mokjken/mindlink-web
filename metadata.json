@@ -1,0 +1,5 @@
+{
+  "name": "MindLink Demo - CTB Junior",
+  "description": "A multi-party anonymous emotional feedback platform featuring real-time risk analysis and teacher dashboards. Designed for Cloudflare Stack deployment.",
+  "requestFramePermissions": []
+}

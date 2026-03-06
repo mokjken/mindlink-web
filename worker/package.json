@@ -1,0 +1,1 @@
+{"name":"mindlink-worker","module":true,"type":"module","dependencies":{"hono":"^4.4.0"},"devDependencies":{"@cloudflare/workers-types":"^4.20260131.0","wrangler":"^3.57.1"}}

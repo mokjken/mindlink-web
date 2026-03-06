@@ -1,0 +1,94 @@
+@import "tailwindcss";
+
+@theme {
+    /* Override colors to Hex for html2canvas compatibility */
+    /* Do NOT use --color-*: initial; as it breaks global defaults like transparency */
+
+    --color-white: #ffffff;
+    --color-black: #000000;
+
+    --color-slate-50: #f8fafc;
+    --color-slate-100: #f1f5f9;
+    --color-slate-200: #e2e8f0;
+    --color-slate-300: #cbd5e1;
+    --color-slate-400: #94a3b8;
+    --color-slate-500: #64748b;
+    --color-slate-600: #475569;
+    --color-slate-700: #334155;
+    --color-slate-800: #1e293b;
+    --color-slate-900: #0f172a;
+    --color-slate-950: #020617;
+
+    --color-indigo-50: #eef2ff;
+    --color-indigo-100: #e0e7ff;
+    --color-indigo-200: #c7d2fe;
+    --color-indigo-300: #a5b4fc;
+    --color-indigo-400: #818cf8;
+    --color-indigo-500: #6366f1;
+    --color-indigo-600: #4f46e5;
+    --color-indigo-700: #4338ca;
+    --color-indigo-800: #3730a3;
+    --color-indigo-900: #312e81;
+
+    --color-blue-50: #eff6ff;
+    --color-blue-100: #dbeafe;
+    --color-blue-500: #3b82f6;
+    --color-blue-600: #2563eb;
+
+    --color-red-50: #fef2f2;
+    --color-red-500: #ef4444;
+    --color-red-600: #dc2626;
+
+    --color-green-50: #f0fdf4;
+    --color-green-500: #22c55e;
+    --color-green-600: #16a34a;
+
+    --color-orange-50: #fff7ed;
+    --color-orange-500: #f97316;
+    --color-orange-600: #ea580c;
+
+    --color-purple-500: #a855f7;
+    --color-pink-500: #ec4899;
+    --color-emerald-500: #10b981;
+    --color-emerald-700: #047857;
+}
+
+@media print {
+    body * {
+        visibility: hidden;
+    }
+
+    #weekly-report-content,
+    #weekly-report-content * {
+        visibility: visible;
+    }
+
+    #weekly-report-content {
+        position: absolute !important;
+        left: 0 !important;
+        top: 0 !important;
+        width: 100% !important;
+        height: auto !important;
+        overflow: visible !important;
+        background: white !important;
+        z-index: 9999 !important;
+        margin: 0 !important;
+        padding: 20px !important;
+    }
+
+    /* Hide scrollbars in print */
+    ::-webkit-scrollbar {
+        display: none;
+    }
+
+    /* Force background graphics */
+    * {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+}
+
+/* Force Web Font for Export Compatibility */
+body {
+    font-family: "Inter", "Roboto", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
