@@ -5,7 +5,7 @@ import { StudentView } from './components/StudentView';
 import { TeacherDashboard } from './components/TeacherDashboard';
 import { AdminDashboard } from './components/AdminDashboard';
 import { ControlPanel } from './components/ControlPanel';
-import { BackendSpecs } from './components/BackendSpecs';
+import { AboutPage } from './components/AboutPage';
 import { ToastProvider } from './components/ToastProvider';
 import { JudgeGuide } from './components/guide/JudgeGuide';
 
@@ -23,7 +23,7 @@ const App: React.FC = () => {
             {activeTab === 'teacher' && <TeacherDashboard />}
             {activeTab === 'admin' && <AdminDashboard />}
             {activeTab === 'demo' && <ControlPanel />}
-            {activeTab === 'specs' && <BackendSpecs />}
+            {activeTab === 'specs' && <AboutPage />}
           </div>
           <JudgeGuide currentView={activeTab} onNavigate={(v: any) => setActiveTab(v)} />
         </Layout>

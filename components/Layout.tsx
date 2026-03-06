@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShieldAlert, Code, HeartHandshake, Settings, School, GraduationCap } from 'lucide-react';
+import { ShieldAlert, Github, HeartHandshake, Settings, School, GraduationCap } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AvatarStatus } from './AvatarStatus';
 
@@ -15,7 +15,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, onTabChange
     { id: 'teacher', label: '教师端', icon: GraduationCap },
     { id: 'admin', label: '管理端', icon: School },
     { id: 'demo', label: '演示', icon: Settings },
-    { id: 'specs', label: '规格', icon: Code },
+    { id: 'specs', label: '关于项目', icon: Github },
   ];
 
   return (
