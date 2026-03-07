@@ -113,22 +113,14 @@ app.post('/api/status', async (c) => {
 
 app.get('/api/status/feed', async (c) => {
     const now = Date.now();
-    // 1. Get recent statuses
-    const { results: statuses } = await c.env.DB.prepare(
-        `SELECT class_id, status_key, custom_text, color_hex, created_at, 'status' as type FROM user_statuses WHERE expires_at > ? ORDER BY created_at DESC LIMIT 30`
-    ).bind(now).all();
-
-    // 2. Get recent moods
-    const { results: moods } = await c.env.DB.prepare(
-        `SELECT class_id, emotion_label as status_key, content as custom_text, mood_color as color_hex, created_at, 'mood' as type FROM mood_entries ORDER BY created_at DESC LIMIT 30`
-    ).all();
-
-    // 3. Merge, sort by created_at DESC, and limit to 50
-    const feed = [...statuses, ...moods]
-        .sort((a: any, b: any) => b.created_at - a.created_at)
-        .slice(0, 40);
-
-    return c.json(feed);
+    try {
+        const { results } = await c.env.DB.prepare(
+            `SELECT class_id, status_key, custom_text, color_hex, created_at FROM user_statuses WHERE expires_at > ? ORDER BY created_at DESC LIMIT 50`
+        ).bind(now).all();
+        return c.json(results);
+    } catch (e: any) {
+        return c.json({ error: e.message }, 500);
+    }
 });
 
 // --- TEACHER STATS ---

@@ -10,7 +10,6 @@ interface FeedItem {
     custom_text: string | null;
     color_hex: string;
     created_at: number;
-    type?: string;
 }
 
 export const StatusFeed: React.FC = () => {
@@ -63,9 +62,8 @@ export const StatusFeed: React.FC = () => {
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 px-2">
                 {feed.map((item, i) => {
-                    const isMood = item.type === 'mood';
-                    const preset = !isMood ? STATUS_PRESETS.find(p => p.key === item.status_key) : null;
-                    const Icon = preset?.icon || (isMood ? Heart : User);
+                    const preset = STATUS_PRESETS.find(p => p.key === item.status_key);
+                    const Icon = preset?.icon || User;
                     const label = preset?.label || item.status_key;
 
                     return (
@@ -97,7 +95,6 @@ export const StatusFeed: React.FC = () => {
                                 <div>
                                     <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
                                         来自 {item.class_id || '未知班级'} {(item.class_id || '').endsWith('班') ? '' : '班'}
-                                        {isMood && ' · 情绪记录'}
                                     </span>
                                     <p className="text-sm font-bold text-slate-800 leading-tight">
                                         {item.custom_text || label}
