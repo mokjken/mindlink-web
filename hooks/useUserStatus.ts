@@ -2,9 +2,13 @@ import { useState, useEffect, useCallback } from 'react';
 import { api } from '../services/api';
 
 export interface UserStatus {
+    id?: number;
+    class_id?: string | null;
     status_key: string;
     custom_text?: string;
     color_hex: string;
+    created_at?: number;
+    expires_at?: number;
 }
 
 export const useUserStatus = () => {
@@ -29,12 +33,15 @@ export const useUserStatus = () => {
     const updateStatus = async (statusKey: string, customText: string | null, colorHex: string, classId?: string) => {
         // Optimistic update
         const previousStatus = status;
-        const newStatus = { status_key: statusKey, custom_text: customText || undefined, color_hex: colorHex };
+        const newStatus = { ...previousStatus, status_key: statusKey, custom_text: customText || undefined, color_hex: colorHex, class_id: classId || previousStatus?.class_id };
 
         setStatus(newStatus as UserStatus);
 
         try {
-            await api.status.set(statusKey, customText || null, colorHex, classId);
+            const response = await api.status.set(statusKey, customText || null, colorHex, classId);
+            if (response?.item) {
+                setStatus(response.item as UserStatus);
+            }
             setError(null);
         } catch (err) {
             console.error("Error setting status:", err);

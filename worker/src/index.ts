@@ -5,16 +5,60 @@ import { cors } from 'hono/cors';
 type Bindings = {
     DB: D1Database;
     GEMINI_API_KEY: string;
+    TEACHER_PORTAL_PASSWORD?: string;
+    ADMIN_PORTAL_PASSWORD?: string;
+    CONSOLE_PORTAL_PASSWORD?: string;
 };
 
 const app = new Hono<{ Bindings: Bindings }>();
 
 app.use('/*', cors());
 
+type RestrictedPortal = 'teacher' | 'admin' | 'console';
+
+const getPortalSecret = (env: Bindings, portal: RestrictedPortal) => {
+    if (portal === 'teacher') return env.TEACHER_PORTAL_PASSWORD;
+    if (portal === 'admin') return env.ADMIN_PORTAL_PASSWORD;
+    return env.CONSOLE_PORTAL_PASSWORD;
+};
+
+const portalAuthMiddleware = (allowedPortals: RestrictedPortal[]) => {
+    return async (c: any, next: any) => {
+        const suppliedPassword = (c.req.header('x-portal-password') || '').trim();
+        const configuredPortals = allowedPortals.filter((portal) => Boolean(getPortalSecret(c.env, portal)));
+
+        if (!configuredPortals.length) {
+            return c.json({ error: 'Portal auth is not configured.' }, 503);
+        }
+
+        if (!suppliedPassword) {
+            return c.json({ error: 'Portal password required.' }, 401);
+        }
+
+        const isAllowed = configuredPortals.some((portal) => suppliedPassword === getPortalSecret(c.env, portal));
+        if (!isAllowed) {
+            return c.json({ error: 'Invalid portal password.' }, 401);
+        }
+
+        await next();
+    };
+};
+
+app.use('/api/teacher/*', portalAuthMiddleware(['teacher', 'admin', 'console']));
+app.use('/api/admin/*', portalAuthMiddleware(['admin', 'console']));
+app.use('/api/console/*', portalAuthMiddleware(['console']));
+app.use('/api/classes', portalAuthMiddleware(['teacher', 'admin', 'console']));
+app.use('/api/classes/*', portalAuthMiddleware(['teacher', 'admin', 'console']));
+app.use('/api/logs/*', portalAuthMiddleware(['teacher', 'admin', 'console']));
+app.use('/api/export/*', portalAuthMiddleware(['teacher', 'admin', 'console']));
+app.use('/api/advice/history', portalAuthMiddleware(['teacher', 'admin', 'console']));
+app.use('/api/advice/*', portalAuthMiddleware(['teacher', 'admin', 'console']));
+app.use('/api/report/*', portalAuthMiddleware(['teacher', 'admin', 'console']));
+
 // CONSTANTS (Ported)
 // CONSTANTS (Ported)
 const RISK_KEYWORDS = ['die', 'hurt', 'pain', 'bullying', 'suicide', 'kill', 'hopeless', 'blood', 'bomb', '死', '自杀', '暴力', '炸', '血', '痛苦', '绝望', '伤害'];
-const CATEGORIES = ['学业', '社交', '家庭', '健康', '未来'];
+const CATEGORIES = ['Academic', 'Social', 'Environment', 'Health', 'Future'];
 const EMOTIONS = [
     { label: '开心', color: '#FCE205', score: 5, category: 'Positive' },
     { label: '满足', color: '#FFAB76', score: 4, category: 'Positive' },
@@ -36,23 +80,904 @@ const analyzeRisk = (content: string) => {
     return RISK_KEYWORDS.some(word => lowerContent.includes(word)) ? 'High' : 'Normal';
 };
 
+const LOCATION_ALIAS_LABELS: Record<string, string> = {
+    AQ1: '区域-A1',
+    AQ2: '区域-A2',
+    AQ3: '区域-A3',
+    AQ4: '区域-A4',
+    ElectricityBuilding: '区域-B1',
+    SideBuilding: '区域-B2',
+    GirlDorm: '区域-C1',
+    BoyDorm: '区域-C2',
+    Canteen: '区域-D1',
+    SwimmingPool: '区域-D2',
+    DormAB: '区域-E1',
+    DormCD: '区域-E2',
+    AdministrationBuilding: '区域-F1',
+    Gymnasium: '区域-F2',
+    BasketballCourt: '区域-F3',
+    '电力楼': '区域-B1',
+    '侧楼': '区域-B2',
+    '女生宿舍': '区域-C1',
+    '男生宿舍': '区域-C2',
+    '食堂': '区域-D1',
+    '游泳馆': '区域-D2',
+    '宿舍AB': '区域-E1',
+    '宿舍CD': '区域-E2',
+    '行政楼': '区域-F1',
+    '体育馆': '区域-F2',
+    '篮球场': '区域-F3'
+};
+
+const LOCATION_DISPLAY_LABELS: Record<string, string> = {
+    AQ1: 'AQ1',
+    AQ2: 'AQ2',
+    AQ3: 'AQ3',
+    AQ4: 'AQ4',
+    ElectricityBuilding: '电力楼',
+    SideBuilding: '侧楼',
+    GirlDorm: '女生宿舍',
+    BoyDorm: '男生宿舍',
+    Canteen: '食堂',
+    SwimmingPool: '游泳馆',
+    DormAB: '宿舍AB',
+    DormCD: '宿舍CD',
+    AdministrationBuilding: '行政楼',
+    Gymnasium: '体育馆',
+    BasketballCourt: '篮球场',
+    '电力楼': '电力楼',
+    '侧楼': '侧楼',
+    '女生宿舍': '女生宿舍',
+    '男生宿舍': '男生宿舍',
+    '食堂': '食堂',
+    '游泳馆': '游泳馆',
+    '宿舍AB': '宿舍AB',
+    '宿舍CD': '宿舍CD',
+    '行政楼': '行政楼',
+    '体育馆': '体育馆',
+    '篮球场': '篮球场'
+};
+
+const KNOWN_LOCATION_KEYS = Object.keys(LOCATION_DISPLAY_LABELS);
+
+const CATEGORY_LABELS: Record<string, string> = {
+    Academic: '学习任务',
+    Social: '同伴互动',
+    Environment: '校园环境',
+    Health: '身心状态',
+    Future: '目标压力',
+    Unspecified: '未补充',
+    学业: '学习任务',
+    社交: '同伴互动',
+    环境: '校园环境',
+    健康: '身心状态',
+    未来: '目标压力',
+    未分类: '未补充'
+};
+
+const AI_ADVICE_REFRESH_MS = 15 * 60 * 1000;
+const LEGACY_STATUS_KEY_MAP: Record<string, string> = {
+    ranking: 'relaxing',
+    sleeping: 'recharging'
+};
+const FEATURE_KEYS = {
+    mood: 'mood_bubble',
+    status: 'status_community'
+} as const;
+
+type AchievementStats = {
+    moodCount: number;
+    statusCount: number;
+    resonanceSentCount: number;
+    resonanceReceivedCount: number;
+    totalEvents: number;
+    activeDays: number;
+    currentStreak: number;
+    longestStreak: number;
+};
+
+type BadgeTier = 'bronze' | 'silver' | 'gold';
+
+const ACHIEVEMENT_BADGES: Array<{
+    key: string;
+    name: string;
+    description: string;
+    tier: BadgeTier;
+    progress: (stats: AchievementStats) => number;
+    unlocked: (stats: AchievementStats) => boolean;
+}> = [
+    {
+        key: 'first_bubble',
+        name: '第一次冒泡',
+        description: '首次提交情绪气泡反馈',
+        tier: 'bronze',
+        progress: (stats) => stats.moodCount,
+        unlocked: (stats) => stats.moodCount >= 1
+    },
+    {
+        key: 'first_status',
+        name: '状态亮相',
+        description: '首次发布情绪社区状态',
+        tier: 'bronze',
+        progress: (stats) => stats.statusCount,
+        unlocked: (stats) => stats.statusCount >= 1
+    },
+    {
+        key: 'first_resonance_sent',
+        name: '同感发出',
+        description: '首次向同学送出同感',
+        tier: 'bronze',
+        progress: (stats) => stats.resonanceSentCount,
+        unlocked: (stats) => stats.resonanceSentCount >= 1
+    },
+    {
+        key: 'first_resonance_received',
+        name: '被看见了',
+        description: '首次收到同学的同感回应',
+        tier: 'bronze',
+        progress: (stats) => stats.resonanceReceivedCount,
+        unlocked: (stats) => stats.resonanceReceivedCount >= 1
+    },
+    {
+        key: 'mood_ten',
+        name: '情绪记录者',
+        description: '累计完成 10 次情绪气泡反馈',
+        tier: 'silver',
+        progress: (stats) => stats.moodCount,
+        unlocked: (stats) => stats.moodCount >= 10
+    },
+    {
+        key: 'status_five',
+        name: '班级状态搭子',
+        description: '累计发布 5 次情绪社区状态',
+        tier: 'silver',
+        progress: (stats) => stats.statusCount,
+        unlocked: (stats) => stats.statusCount >= 5
+    },
+    {
+        key: 'streak_three',
+        name: '稳定在线',
+        description: '连续 3 天保持上传或互动',
+        tier: 'silver',
+        progress: (stats) => stats.longestStreak,
+        unlocked: (stats) => stats.longestStreak >= 3
+    },
+    {
+        key: 'streak_seven',
+        name: '一周同频',
+        description: '连续 7 天保持上传或互动',
+        tier: 'gold',
+        progress: (stats) => stats.longestStreak,
+        unlocked: (stats) => stats.longestStreak >= 7
+    },
+    {
+        key: 'all_rounder',
+        name: '全链路体验官',
+        description: '完成气泡反馈、状态发布和同感互动三种行为',
+        tier: 'gold',
+        progress: (stats) => Number(stats.moodCount > 0) + Number(stats.statusCount > 0) + Number(stats.resonanceSentCount > 0),
+        unlocked: (stats) => stats.moodCount > 0 && stats.statusCount > 0 && stats.resonanceSentCount > 0
+    }
+];
+
+const STATUS_COMMUNITY_PRESETS = [
+    { key: 'recharging', color: '#10B981', text: '满血复活中...' },
+    { key: 'focus', color: '#3B82F6', text: '先把注意力放回来' },
+    { key: 'crushing', color: '#EC4899', text: '发现美好' },
+    { key: 'vibing', color: '#06B6D4', text: 'BGM播放中' },
+    { key: 'gym', color: '#F59E0B', text: '多巴胺分泌' },
+    { key: 'exploring', color: '#6366F1', text: '寻找灵感' },
+    { key: 'relaxing', color: '#64748B', text: '享受当下' },
+    { key: 'fire', color: '#EF4444', text: '全力以赴！' }
+] as const;
+
+const DEFAULT_PORTAL_CLASSES = [
+    { class_id: '初一一班', faculty: 'CNC', default_location: 'AQ1', sort_order: 1 },
+    { class_id: '初一二班', faculty: 'CNC', default_location: 'AQ1', sort_order: 2 },
+    { class_id: '初一三班', faculty: 'CNC', default_location: 'AQ1', sort_order: 3 },
+    { class_id: '初二一班', faculty: 'CNC', default_location: 'AQ1', sort_order: 4 },
+    { class_id: '初二二班', faculty: 'CNC', default_location: 'AQ1', sort_order: 5 },
+    { class_id: '初三一班', faculty: 'CNC', default_location: 'AQ1', sort_order: 6 },
+    { class_id: '初三二班', faculty: 'CNC', default_location: 'AQ1', sort_order: 7 },
+    { class_id: 'G7SP', faculty: 'AA', default_location: 'AQ4', sort_order: 101 },
+    { class_id: 'G8TR', faculty: 'AA', default_location: 'AQ4', sort_order: 102 },
+    { class_id: 'G8AD', faculty: 'AA', default_location: 'AQ4', sort_order: 103 },
+    { class_id: 'G9TW', faculty: 'AA', default_location: 'AQ4', sort_order: 104 },
+    { class_id: 'G9RA', faculty: 'AA', default_location: 'AQ4', sort_order: 105 },
+    { class_id: 'S1ALevel', faculty: 'AA', default_location: 'AQ4', sort_order: 106 },
+    { class_id: 'S1Passion', faculty: 'AA', default_location: 'AQ4', sort_order: 107 },
+    { class_id: 'S1APower', faculty: 'AA', default_location: 'AQ4', sort_order: 108 },
+    { class_id: 'S2ALevel', faculty: 'AA', default_location: 'AQ2', sort_order: 109 },
+    { class_id: 'S2APower', faculty: 'AA', default_location: 'AQ2', sort_order: 110 },
+    { class_id: 'S2APassion', faculty: 'AA', default_location: 'AQ2', sort_order: 111 },
+    { class_id: 'S3ALevel', faculty: 'AA', default_location: 'AQ2', sort_order: 112 },
+    { class_id: 'S3APower', faculty: 'AA', default_location: 'AQ2', sort_order: 113 },
+    { class_id: 'S3APassion', faculty: 'AA', default_location: 'AQ2', sort_order: 114 }
+] as const;
+
+const normalizeStatusKey = (statusKey?: string | null) => {
+    if (!statusKey) return statusKey || null;
+    return LEGACY_STATUS_KEY_MAP[statusKey] || statusKey;
+};
+
+const normalizeStatusRow = <T extends { status_key?: string | null }>(row: T | null) =>
+    row ? { ...row, status_key: normalizeStatusKey(row.status_key) } : row;
+
+const ensurePortalClassesSeeded = async (db: D1Database) => {
+    const existing = await db.prepare(`SELECT COUNT(*) as count FROM portal_classes`).first<{ count: number | string }>();
+    if (Number(existing?.count || 0) > 0) return;
+
+    const seedBatch = DEFAULT_PORTAL_CLASSES.map((item) =>
+        db.prepare(
+            `INSERT OR IGNORE INTO portal_classes (class_id, faculty, default_location, sort_order, is_active, created_at) VALUES (?, ?, ?, ?, 1, ?)`
+        ).bind(item.class_id, item.faculty, item.default_location, item.sort_order, Date.now())
+    );
+
+    if (seedBatch.length > 0) {
+        await db.batch(seedBatch);
+    }
+};
+
+const incrementUserFeatureUsage = async (
+    db: D1Database,
+    userId: string,
+    classId: string | null | undefined,
+    featureKey: string,
+    timestamp = Date.now()
+) => {
+    if (!userId || !featureKey) return;
+
+    await db.prepare(
+        `INSERT INTO user_feature_usage (user_id, class_id, feature_key, upload_count, last_uploaded_at)
+         VALUES (?, ?, ?, 1, ?)
+         ON CONFLICT(user_id, class_id, feature_key)
+         DO UPDATE SET
+           upload_count = user_feature_usage.upload_count + 1,
+           last_uploaded_at = excluded.last_uploaded_at,
+           class_id = excluded.class_id`
+        ).bind(userId, classId || null, featureKey, timestamp).run();
+};
+
+const ensureAchievementTables = async (db: D1Database) => {
+    await db.batch([
+        db.prepare(
+            `CREATE TABLE IF NOT EXISTS achievement_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                class_id TEXT,
+                event_key TEXT NOT NULL,
+                feature_key TEXT,
+                reference_id TEXT,
+                event_value INTEGER DEFAULT 1,
+                created_at INTEGER NOT NULL
+            )`
+        ),
+        db.prepare(`CREATE INDEX IF NOT EXISTS idx_achievement_events_user_time ON achievement_events(user_id, created_at DESC)`),
+        db.prepare(`CREATE INDEX IF NOT EXISTS idx_achievement_events_event ON achievement_events(event_key, created_at DESC)`),
+        db.prepare(
+            `CREATE TABLE IF NOT EXISTS daily_user_activity (
+                user_id TEXT NOT NULL,
+                activity_date TEXT NOT NULL,
+                class_id TEXT,
+                mood_count INTEGER DEFAULT 0,
+                status_count INTEGER DEFAULT 0,
+                resonance_sent_count INTEGER DEFAULT 0,
+                resonance_received_count INTEGER DEFAULT 0,
+                total_events INTEGER DEFAULT 0,
+                last_activity_at INTEGER,
+                PRIMARY KEY (user_id, activity_date)
+            )`
+        ),
+        db.prepare(`CREATE INDEX IF NOT EXISTS idx_daily_user_activity_class_date ON daily_user_activity(class_id, activity_date DESC)`),
+        db.prepare(
+            `CREATE TABLE IF NOT EXISTS user_badges (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                class_id TEXT,
+                badge_key TEXT NOT NULL,
+                badge_name TEXT NOT NULL,
+                badge_description TEXT,
+                badge_tier TEXT NOT NULL,
+                progress_value INTEGER DEFAULT 0,
+                unlocked_at INTEGER NOT NULL,
+                last_seen_at INTEGER,
+                UNIQUE(user_id, badge_key)
+            )`
+        ),
+        db.prepare(`CREATE INDEX IF NOT EXISTS idx_user_badges_user_time ON user_badges(user_id, unlocked_at DESC)`),
+        db.prepare(`CREATE INDEX IF NOT EXISTS idx_user_badges_unlocked_at ON user_badges(unlocked_at DESC)`)
+    ]);
+};
+
+const ensureUserPortalProgressTable = async (db: D1Database) => {
+    await db.batch([
+        db.prepare(
+            `CREATE TABLE IF NOT EXISTS user_portal_progress (
+                user_id TEXT NOT NULL,
+                class_id TEXT,
+                portal_key TEXT NOT NULL,
+                start_seen_at INTEGER,
+                guide_completed_at INTEGER,
+                updated_at INTEGER,
+                PRIMARY KEY (user_id, portal_key)
+            )`
+        ),
+        db.prepare(`CREATE INDEX IF NOT EXISTS idx_user_portal_progress_class_portal ON user_portal_progress(class_id, portal_key)`),
+        db.prepare(`CREATE INDEX IF NOT EXISTS idx_user_portal_progress_guide ON user_portal_progress(portal_key, guide_completed_at DESC)`)
+    ]);
+};
+
+const isSyntheticAnalyticsUser = (userId: unknown) => {
+    if (typeof userId !== 'string') return false;
+    return /^#MockUser\d+$/i.test(userId)
+        || /^#\d{4,}$/.test(userId)
+        || /^feed-\d+$/i.test(userId)
+        || /^SYS-/i.test(userId);
+};
+
+const buildSystemStatusUserId = (classId: string, index: number) => {
+    const compactClass = (classId || 'CLS').replace(/[^A-Za-z0-9\u4e00-\u9fa5]/g, '').slice(0, 6) || 'CLS';
+    return `SYS-${compactClass}-${String(index + 1).padStart(3, '0')}`;
+};
+
+const formatConsoleDayLabel = (timestamp: number) => {
+    const bjDate = new Date(timestamp + 8 * 60 * 60 * 1000);
+    const month = bjDate.getUTCMonth() + 1;
+    const day = bjDate.getUTCDate();
+    return `${month}/${day}`;
+};
+
+const getBeijingDayKey = (timestamp = Date.now()) =>
+    new Date(timestamp + 8 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+const getBeijingDayRange = (timestamp = Date.now()) => {
+    const dayKey = getBeijingDayKey(timestamp);
+    const start = new Date(`${dayKey}T00:00:00+08:00`).getTime();
+    const end = start + 24 * 60 * 60 * 1000;
+    return { start, end, dayKey };
+};
+
+const computeStreaksFromDays = (dates: string[]) => {
+    const normalized = [...new Set(dates.filter(Boolean))].sort((a, b) => b.localeCompare(a));
+    if (!normalized.length) {
+        return { currentStreak: 0, longestStreak: 0, activeDays: 0 };
+    }
+
+    const isConsecutive = (current: string, previous: string) => {
+        const currentDate = new Date(`${current}T00:00:00+08:00`);
+        const previousDate = new Date(`${previous}T00:00:00+08:00`);
+        const diff = Math.round((previousDate.getTime() - currentDate.getTime()) / (24 * 60 * 60 * 1000));
+        return diff === 1;
+    };
+
+    let longestStreak = 1;
+    let running = 1;
+    for (let index = 1; index < normalized.length; index += 1) {
+        if (isConsecutive(normalized[index], normalized[index - 1])) {
+            running += 1;
+            longestStreak = Math.max(longestStreak, running);
+        } else {
+            running = 1;
+        }
+    }
+
+    const todayKey = getBeijingDayKey();
+    const yesterdayKey = getBeijingDayKey(Date.now() - 24 * 60 * 60 * 1000);
+    let currentStreak = 0;
+    if (normalized[0] === todayKey || normalized[0] === yesterdayKey) {
+        currentStreak = 1;
+        for (let index = 1; index < normalized.length; index += 1) {
+            if (isConsecutive(normalized[index], normalized[index - 1])) {
+                currentStreak += 1;
+            } else {
+                break;
+            }
+        }
+    }
+
+    return {
+        currentStreak,
+        longestStreak,
+        activeDays: normalized.length
+    };
+};
+
+const getUserAchievementStats = async (db: D1Database, userId: string): Promise<AchievementStats> => {
+    const [usageResult, dailyResult] = await Promise.all([
+        db.prepare(
+            `SELECT feature_key, upload_count FROM user_feature_usage WHERE user_id = ?`
+        ).bind(userId).all(),
+        db.prepare(
+            `SELECT activity_date, mood_count, status_count, resonance_sent_count, resonance_received_count
+             FROM daily_user_activity
+             WHERE user_id = ?
+             ORDER BY activity_date DESC`
+        ).bind(userId).all()
+    ]);
+
+    const usageRows = (usageResult.results || []) as Array<{ feature_key: string; upload_count: number | string }>;
+    const dailyRows = (dailyResult.results || []) as Array<{
+        activity_date: string;
+        mood_count: number | string;
+        status_count: number | string;
+        resonance_sent_count: number | string;
+        resonance_received_count: number | string;
+    }>;
+
+    const moodCount = usageRows
+        .filter((row) => row.feature_key === FEATURE_KEYS.mood)
+        .reduce((sum, row) => sum + Number(row.upload_count || 0), 0);
+    const statusCount = usageRows
+        .filter((row) => row.feature_key === FEATURE_KEYS.status)
+        .reduce((sum, row) => sum + Number(row.upload_count || 0), 0);
+    const resonanceSentCount = dailyRows.reduce((sum, row) => sum + Number(row.resonance_sent_count || 0), 0);
+    const resonanceReceivedCount = dailyRows.reduce((sum, row) => sum + Number(row.resonance_received_count || 0), 0);
+    const streaks = computeStreaksFromDays(dailyRows.map((row) => row.activity_date));
+
+    return {
+        moodCount,
+        statusCount,
+        resonanceSentCount,
+        resonanceReceivedCount,
+        totalEvents: moodCount + statusCount + resonanceSentCount + resonanceReceivedCount,
+        activeDays: streaks.activeDays,
+        currentStreak: streaks.currentStreak,
+        longestStreak: streaks.longestStreak
+    };
+};
+
+const syncUserBadges = async (
+    db: D1Database,
+    userId: string,
+    classId: string | null | undefined,
+    timestamp = Date.now()
+) => {
+    const stats = await getUserAchievementStats(db, userId);
+    const upserts = ACHIEVEMENT_BADGES
+        .filter((badge) => badge.unlocked(stats))
+        .map((badge) =>
+            db.prepare(
+                `INSERT INTO user_badges (user_id, class_id, badge_key, badge_name, badge_description, badge_tier, progress_value, unlocked_at, last_seen_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(user_id, badge_key)
+                 DO UPDATE SET
+                   class_id = excluded.class_id,
+                   progress_value = CASE
+                     WHEN excluded.progress_value > user_badges.progress_value THEN excluded.progress_value
+                     ELSE user_badges.progress_value
+                   END,
+                   last_seen_at = excluded.last_seen_at`
+            ).bind(
+                userId,
+                classId || null,
+                badge.key,
+                badge.name,
+                badge.description,
+                badge.tier,
+                badge.progress(stats),
+                timestamp,
+                timestamp
+            )
+        );
+
+    if (upserts.length) {
+        await db.batch(upserts);
+    }
+};
+
+const recordAchievementEvent = async (
+    db: D1Database,
+    payload: {
+        userId: string;
+        classId?: string | null;
+        eventKey: string;
+        featureKey?: string | null;
+        referenceId?: string | number | null;
+        eventValue?: number;
+        createdAt?: number;
+        moodDelta?: number;
+        statusDelta?: number;
+        resonanceSentDelta?: number;
+        resonanceReceivedDelta?: number;
+    }
+) => {
+    const {
+        userId,
+        classId = null,
+        eventKey,
+        featureKey = null,
+        referenceId = null,
+        eventValue = 1,
+        createdAt = Date.now(),
+        moodDelta = 0,
+        statusDelta = 0,
+        resonanceSentDelta = 0,
+        resonanceReceivedDelta = 0
+    } = payload;
+
+    if (!userId || isSyntheticAnalyticsUser(userId)) return;
+
+    await ensureAchievementTables(db);
+
+    const activityDate = getBeijingDayKey(createdAt);
+    await db.batch([
+        db.prepare(
+            `INSERT INTO achievement_events (user_id, class_id, event_key, feature_key, reference_id, event_value, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`
+        ).bind(userId, classId, eventKey, featureKey, referenceId ? String(referenceId) : null, eventValue, createdAt),
+        db.prepare(
+            `INSERT INTO daily_user_activity (
+                user_id,
+                activity_date,
+                class_id,
+                mood_count,
+                status_count,
+                resonance_sent_count,
+                resonance_received_count,
+                total_events,
+                last_activity_at
+            )
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(user_id, activity_date)
+             DO UPDATE SET
+               class_id = excluded.class_id,
+               mood_count = daily_user_activity.mood_count + excluded.mood_count,
+               status_count = daily_user_activity.status_count + excluded.status_count,
+               resonance_sent_count = daily_user_activity.resonance_sent_count + excluded.resonance_sent_count,
+               resonance_received_count = daily_user_activity.resonance_received_count + excluded.resonance_received_count,
+               total_events = daily_user_activity.total_events + excluded.total_events,
+               last_activity_at = excluded.last_activity_at`
+        ).bind(
+            userId,
+            activityDate,
+            classId,
+            moodDelta,
+            statusDelta,
+            resonanceSentDelta,
+            resonanceReceivedDelta,
+            eventValue,
+            createdAt
+        )
+    ]);
+
+    await syncUserBadges(db, userId, classId, createdAt);
+};
+
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const replaceStandaloneToken = (input: string, token: string, replacement: string) =>
+    input.replace(
+        new RegExp(`(^|[^A-Za-z0-9])${escapeRegExp(token)}(?=$|[^A-Za-z0-9])`, 'g'),
+        (_, prefix: string) => `${prefix}${replacement}`
+    );
+
+const stripMarkdownFormatting = (input: string) => {
+    if (!input) return input;
+
+    return input
+        .replace(/\r\n/g, '\n')
+        .replace(/^#{1,6}\s*/gm, '')
+        .replace(/\*\*(.*?)\*\*/g, '$1')
+        .replace(/__(.*?)__/g, '$1')
+        .replace(/^[ \t]*\*\s+/gm, '• ')
+        .replace(/^[ \t]*-\s+/gm, '• ')
+        .replace(/^[ \t]*\d+\.\s+/gm, '• ')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+};
+
+const buildAdviceScopeId = (scopeId: string, lang: 'zh' | 'en') =>
+    lang === 'en' ? `${scopeId}::en` : scopeId;
+
+const getBeijingNow = () => {
+    const now = new Date();
+    return new Date(now.getTime() + 8 * 60 * 60 * 1000);
+};
+
+const getBeijingDateString = () => getBeijingNow().toISOString().split('T')[0];
+
+const getTimeContextLabel = (date = getBeijingNow()) => {
+    const hour = date.getUTCHours();
+    if (hour < 6) return '凌晨时段';
+    if (hour < 11) return '上午时段';
+    if (hour < 14) return '中午时段';
+    if (hour < 18) return '下午时段';
+    if (hour < 22) return '晚间时段';
+    return '夜间时段';
+};
+
+const createAliasRegistry = (classIds: string[], locations: string[]) => {
+    const classAliasMap: Record<string, string> = {};
+    const locationAliasMap: Record<string, string> = {};
+
+    [...new Set(classIds.filter(Boolean))].sort().forEach((classId, index) => {
+        classAliasMap[classId] = `班级组-${String(index + 1).padStart(2, '0')}`;
+    });
+
+    [...new Set([...KNOWN_LOCATION_KEYS, ...locations.filter(Boolean)])].sort().forEach((location, index) => {
+        locationAliasMap[location] = LOCATION_ALIAS_LABELS[location] || `区域-${String(index + 1).padStart(2, '0')}`;
+    });
+
+    const replaceSensitiveTerms = (input: string) => {
+        let output = input || '';
+
+        Object.entries(classAliasMap).forEach(([raw, alias]) => {
+            output = output.replace(new RegExp(escapeRegExp(raw), 'g'), alias);
+        });
+
+        Object.entries(locationAliasMap).forEach(([raw, alias]) => {
+            output = output.replace(new RegExp(escapeRegExp(raw), 'g'), alias);
+        });
+
+        output = output
+            .replace(/MindLink/gi, '本系统')
+            .replace(/mindlink\.cloud/gi, '系统域名')
+            .replace(/学校|学部|校区|班主任|辅导员/g, (match) => match);
+
+        return output;
+    };
+
+    const restoreAliasedTerms = (input: string) => {
+        let output = input || '';
+
+        Object.entries(classAliasMap).forEach(([raw, alias]) => {
+            output = output.replace(new RegExp(escapeRegExp(alias), 'g'), raw);
+
+            const aliasDigits = alias.match(/(\d+)/)?.[1];
+            if (aliasDigits) {
+                output = output.replace(
+                    new RegExp(`Class\\s+Group-?0*${escapeRegExp(aliasDigits)}\\b`, 'gi'),
+                    raw
+                );
+            }
+        });
+
+        Object.entries(locationAliasMap).forEach(([raw, alias]) => {
+            const displayLabel = LOCATION_DISPLAY_LABELS[raw] || raw;
+            output = output.replace(new RegExp(escapeRegExp(alias), 'g'), displayLabel);
+
+            if (alias.startsWith('区域-')) {
+                const compactAlias = alias.replace('区域-', '');
+                output = output.replace(
+                    new RegExp(`(?:Zone|Area)-?${escapeRegExp(compactAlias)}\\b`, 'gi'),
+                    displayLabel
+                );
+                if (compactAlias && compactAlias !== displayLabel) {
+                    output = replaceStandaloneToken(output, compactAlias, displayLabel);
+                }
+            }
+
+            if (raw !== displayLabel) {
+                output = output.replace(new RegExp(escapeRegExp(raw), 'g'), displayLabel);
+            }
+        });
+
+        return output;
+    };
+
+    return { classAliasMap, locationAliasMap, replaceSensitiveTerms, restoreAliasedTerms };
+};
+
+const summarizeTeacherEntries = (entries: any[], classId: string) => {
+    const aliasRegistry = createAliasRegistry([classId], entries.map((entry) => entry.location || ''));
+    const total = entries.length;
+    const positive = entries.filter((entry) => entry.mood_score >= 4).length;
+    const neutral = entries.filter((entry) => entry.mood_score === 3).length;
+    const negative = entries.filter((entry) => entry.mood_score <= 2).length;
+    const risk = entries.filter((entry) => entry.risk_level === 'High').length;
+
+    const emotionCounts: Record<string, number> = {};
+    const categoryCounts: Record<string, number> = {};
+    const locationCounts: Record<string, number> = {};
+    const weekdayScores: Record<string, { total: number; sum: number }> = {
+        周一: { total: 0, sum: 0 },
+        周二: { total: 0, sum: 0 },
+        周三: { total: 0, sum: 0 },
+        周四: { total: 0, sum: 0 },
+        周五: { total: 0, sum: 0 },
+        周六: { total: 0, sum: 0 },
+        周日: { total: 0, sum: 0 }
+    };
+
+    entries.forEach((entry) => {
+        emotionCounts[entry.emotion_label] = (emotionCounts[entry.emotion_label] || 0) + 1;
+
+        const normalizedCategory = CATEGORY_LABELS[entry.category] || entry.category || '未分类';
+        categoryCounts[normalizedCategory] = (categoryCounts[normalizedCategory] || 0) + 1;
+
+        if (entry.location) {
+            const locationAlias = aliasRegistry.locationAliasMap[entry.location] || '区域-未标记';
+            locationCounts[locationAlias] = (locationCounts[locationAlias] || 0) + 1;
+        }
+
+        const beijingDate = new Date(entry.created_at + 8 * 60 * 60 * 1000);
+        const weekdayNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+        const weekday = weekdayNames[beijingDate.getUTCDay()];
+        weekdayScores[weekday].total += 1;
+        weekdayScores[weekday].sum += entry.mood_score;
+    });
+
+    const topEmotions = Object.entries(emotionCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 4)
+        .map(([emotion, count]) => `${emotion}(${count})`)
+        .join('、');
+
+    const topCategories = Object.entries(categoryCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([category, count]) => `${category}(${count})`)
+        .join('、');
+
+    const topLocations = Object.entries(locationCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([location, count]) => `${location}(${count})`)
+        .join('、');
+
+    const weekdayTrend = Object.entries(weekdayScores)
+        .filter(([, value]) => value.total > 0)
+        .map(([weekday, value]) => `${weekday}:${(value.sum / value.total).toFixed(1)}`)
+        .join('、');
+
+    const sanitizedScope = aliasRegistry.classAliasMap[classId] || '目标班级';
+
+    const summary = [
+        `分析对象：${sanitizedScope}`,
+        `样本量：${total}`,
+        `情绪结构：积极 ${positive}，平稳 ${neutral}，消极 ${negative}`,
+        `高风险条数：${risk}`,
+        `高频情绪：${topEmotions || '暂无'}`,
+        `主要压力来源：${topCategories || '暂无'}`,
+        `主要活动区域：${topLocations || '暂无'}`,
+        `工作日趋势：${weekdayTrend || '暂无'}`
+    ].join('\n');
+
+    return {
+        aliasRegistry,
+        sanitizedScope,
+        summary,
+        metrics: { total, positive, neutral, negative, risk }
+    };
+};
+
+const summarizeAdminEntries = (entries: any[]) => {
+    const aliasRegistry = createAliasRegistry(
+        entries.map((entry) => entry.class_id || ''),
+        entries.map((entry) => entry.location || '')
+    );
+
+    const total = entries.length;
+    const positive = entries.filter((entry) => entry.mood_score >= 4).length;
+    const neutral = entries.filter((entry) => entry.mood_score === 3).length;
+    const negative = entries.filter((entry) => entry.mood_score <= 2).length;
+    const risk = entries.filter((entry) => entry.risk_level === 'High').length;
+
+    const locationStats: Record<string, { total: number; negative: number; risk: number }> = {};
+    const classStats: Record<string, { total: number; negative: number; risk: number }> = {};
+
+    entries.forEach((entry) => {
+        const locationAlias = aliasRegistry.locationAliasMap[entry.location] || '区域-未标记';
+        if (!locationStats[locationAlias]) locationStats[locationAlias] = { total: 0, negative: 0, risk: 0 };
+        locationStats[locationAlias].total++;
+        if (entry.mood_score <= 2) locationStats[locationAlias].negative++;
+        if (entry.risk_level === 'High') locationStats[locationAlias].risk++;
+
+        const classAlias = aliasRegistry.classAliasMap[entry.class_id] || '班级组-未标记';
+        if (!classStats[classAlias]) classStats[classAlias] = { total: 0, negative: 0, risk: 0 };
+        classStats[classAlias].total++;
+        if (entry.mood_score <= 2) classStats[classAlias].negative++;
+        if (entry.risk_level === 'High') classStats[classAlias].risk++;
+    });
+
+    const topLocations = Object.entries(locationStats)
+        .sort((a, b) => (b[1].negative + b[1].risk * 2) - (a[1].negative + a[1].risk * 2))
+        .slice(0, 5)
+        .map(([location, stats]) => `${location}: 样本${stats.total}，消极${stats.negative}，高风险${stats.risk}`)
+        .join('\n');
+
+    const topClasses = Object.entries(classStats)
+        .filter(([, stats]) => stats.total >= 3)
+        .sort((a, b) => (b[1].negative / b[1].total) - (a[1].negative / a[1].total))
+        .slice(0, 5)
+        .map(([classAlias, stats]) => `${classAlias}: 消极率${Math.round(stats.negative / stats.total * 100)}%，高风险${stats.risk}`)
+        .join('\n');
+
+    const summary = [
+        '分析对象：全校聚合视角（已脱敏）',
+        `样本量：${total}`,
+        `情绪结构：积极 ${positive}，平稳 ${neutral}，消极 ${negative}`,
+        `高风险条数：${risk}`,
+        `重点区域：\n${topLocations || '暂无'}`,
+        `重点班级组：\n${topClasses || '暂无'}`
+    ].join('\n');
+
+    return {
+        aliasRegistry,
+        summary,
+        metrics: { total, positive, neutral, negative, risk }
+    };
+};
+
 // --- ROUTES ---
 
 // Submit Mood
 app.post('/api/mood', async (c) => {
     try {
         const body = await c.req.json();
-        const { user_id, role, class_id, mood_score, emotion_label, mood_color, content, location } = body;
+        const { user_id, role, class_id, mood_score, emotion_label, mood_color, content, location, category: providedCategory } = body;
 
         const risk_level = analyzeRisk(content);
-        const category = CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)];
+        const category = CATEGORIES.includes(providedCategory) ? providedCategory : 'Unspecified';
         const created_at = Date.now();
+        const { start: dayStart, end: dayEnd } = getBeijingDayRange(created_at);
+
+        const [todaySummary, lastEntry] = await Promise.all([
+            c.env.DB.prepare(
+                `SELECT COUNT(*) as today_count
+                 FROM mood_entries
+                 WHERE user_id = ? AND created_at >= ? AND created_at < ?`
+            ).bind(user_id, dayStart, dayEnd).first<{ today_count: number | string }>(),
+            c.env.DB.prepare(
+                `SELECT created_at
+                 FROM mood_entries
+                 WHERE user_id = ?
+                 ORDER BY created_at DESC
+                 LIMIT 1`
+            ).bind(user_id).first<{ created_at: number | string }>()
+        ]);
+
+        const todayCount = Number(todaySummary?.today_count || 0);
+        if (todayCount >= 6) {
+            return c.json({
+                error: 'TODAY_LIMIT_REACHED',
+                message: '今天的情绪反馈次数已达上限，请明天再来。',
+                today_upload_count: todayCount,
+                daily_limit: 6
+            }, 429);
+        }
+
+        const lastCreatedAt = Number(lastEntry?.created_at || 0);
+        const cooldownMs = 30 * 60 * 1000;
+        if (lastCreatedAt && created_at - lastCreatedAt < cooldownMs) {
+            const retryAfterMs = cooldownMs - (created_at - lastCreatedAt);
+            return c.json({
+                error: 'COOLDOWN_ACTIVE',
+                message: '两次提交至少需要间隔 30 分钟。',
+                retry_after_ms: retryAfterMs,
+                next_allowed_at: created_at + retryAfterMs,
+                today_upload_count: todayCount,
+                daily_limit: 6
+            }, 429);
+        }
 
         await c.env.DB.prepare(
             `INSERT INTO mood_entries (user_id, role, class_id, mood_score, emotion_label, mood_color, content, location, risk_level, category, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).bind(user_id, role, class_id, mood_score, emotion_label, mood_color, content, location, risk_level, category, created_at).run();
+        await incrementUserFeatureUsage(c.env.DB, user_id, class_id, FEATURE_KEYS.mood, created_at);
+        await recordAchievementEvent(c.env.DB, {
+            userId: user_id,
+            classId: class_id,
+            eventKey: 'mood_submitted',
+            featureKey: FEATURE_KEYS.mood,
+            moodDelta: 1,
+            createdAt: created_at
+        });
 
-        return c.json({ success: true, risk_level });
+        const shareSummary = await c.env.DB.prepare(
+            `SELECT COUNT(DISTINCT user_id) as share_count
+             FROM mood_entries
+             WHERE class_id = ? AND created_at >= ? AND created_at < ?`
+        ).bind(class_id, dayStart, dayEnd).first<{ share_count: number | string }>();
+
+        return c.json({
+            success: true,
+            risk_level,
+            today_upload_count: todayCount + 1,
+            daily_limit: 6,
+            share_count_today: Number(shareSummary?.share_count || 0),
+            cooldown_minutes: 30
+        });
     } catch (e: any) {
         return c.json({ error: e.message }, 500);
     }
@@ -83,6 +1008,112 @@ app.get('/api/student/history', async (c) => {
     return c.json(results);
 });
 
+app.post('/api/auth/verify', async (c) => {
+    try {
+        const body = await c.req.json();
+        const portal = body.portal as RestrictedPortal | undefined;
+        const suppliedPassword = String(body.password || '').trim();
+
+        if (!portal || !['teacher', 'admin', 'console'].includes(portal)) {
+            return c.json({ error: 'Invalid portal' }, 400);
+        }
+
+        const expectedPassword = getPortalSecret(c.env, portal);
+        if (!expectedPassword) {
+            return c.json({ error: 'Portal auth is not configured.' }, 503);
+        }
+
+        if (!suppliedPassword || suppliedPassword !== expectedPassword) {
+            return c.json({ error: 'Invalid portal password.' }, 401);
+        }
+
+        return c.json({ success: true });
+    } catch (e: any) {
+        return c.json({ error: e.message }, 500);
+    }
+});
+
+app.get('/api/student/onboarding', async (c) => {
+    try {
+        await ensureAchievementTables(c.env.DB);
+        await ensureUserPortalProgressTable(c.env.DB);
+        const userId = c.req.query('user_id');
+        const classId = c.req.query('class_id') || null;
+        if (!userId) {
+            return c.json({ error: 'Missing user_id' }, 400);
+        }
+
+        const row = await c.env.DB.prepare(
+            `SELECT user_id, class_id, portal_key, start_seen_at, guide_completed_at, updated_at
+             FROM user_portal_progress
+             WHERE user_id = ? AND portal_key = 'student'
+             LIMIT 1`
+        ).bind(userId).first();
+
+        return c.json(row || {
+            user_id: userId,
+            class_id: classId,
+            portal_key: 'student',
+            start_seen_at: null,
+            guide_completed_at: null,
+            updated_at: null
+        });
+    } catch (e: any) {
+        return c.json({ error: e.message }, 500);
+    }
+});
+
+app.post('/api/student/onboarding', async (c) => {
+    try {
+        await ensureAchievementTables(c.env.DB);
+        await ensureUserPortalProgressTable(c.env.DB);
+        const body = await c.req.json();
+        const userId = body.user_id;
+        const classId = body.class_id || null;
+        const markStartSeen = Boolean(body.mark_start_seen);
+        const markGuideCompleted = Boolean(body.mark_guide_completed);
+        const now = Date.now();
+
+        if (!userId) {
+            return c.json({ error: 'Missing user_id' }, 400);
+        }
+
+        await c.env.DB.prepare(
+            `INSERT INTO user_portal_progress (user_id, class_id, portal_key, start_seen_at, guide_completed_at, updated_at)
+             VALUES (?, ?, 'student', ?, ?, ?)
+             ON CONFLICT(user_id, portal_key)
+             DO UPDATE SET
+               class_id = excluded.class_id,
+               start_seen_at = CASE
+                 WHEN excluded.start_seen_at IS NOT NULL THEN excluded.start_seen_at
+                 ELSE user_portal_progress.start_seen_at
+               END,
+               guide_completed_at = CASE
+                 WHEN excluded.guide_completed_at IS NOT NULL THEN excluded.guide_completed_at
+                 ELSE user_portal_progress.guide_completed_at
+               END,
+               updated_at = excluded.updated_at`
+        ).bind(
+            userId,
+            classId,
+            markStartSeen ? now : null,
+            markGuideCompleted ? now : null,
+            now
+        ).run();
+
+        const row = await c.env.DB.prepare(
+            `SELECT user_id, class_id, portal_key, start_seen_at, guide_completed_at, updated_at
+             FROM user_portal_progress
+             WHERE user_id = ? AND portal_key = 'student'
+             LIMIT 1`
+        ).bind(userId).first();
+
+        return c.json(row);
+    } catch (e: any) {
+        return c.json({ error: e.message }, 500);
+    }
+});
+
 // --- STATUS (WeChat Style) ---
 
 app.get('/api/status', async (c) => {
@@ -91,21 +1122,36 @@ app.get('/api/status', async (c) => {
     const status = await c.env.DB.prepare(
         `SELECT * FROM user_statuses WHERE user_id = ? AND expires_at > ? ORDER BY created_at DESC LIMIT 1`
     ).bind(user_id, now).first();
-    return c.json(status || null);
+    return c.json(normalizeStatusRow(status || null));
 });
 
 app.post('/api/status', async (c) => {
     try {
         const { user_id, class_id, status_key, custom_text, color_hex } = await c.req.json();
+        const normalizedStatusKey = normalizeStatusKey(status_key);
         const now = Date.now();
         const expires_at = now + (24 * 60 * 60 * 1000);
 
         await c.env.DB.prepare(`DELETE FROM user_statuses WHERE user_id = ?`).bind(user_id).run();
         await c.env.DB.prepare(
             `INSERT INTO user_statuses (user_id, class_id, status_key, custom_text, color_hex, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
-        ).bind(user_id, class_id || null, status_key, custom_text || null, color_hex, now, expires_at).run();
+        ).bind(user_id, class_id || null, normalizedStatusKey, custom_text || null, color_hex, now, expires_at).run();
+        await incrementUserFeatureUsage(c.env.DB, user_id, class_id, FEATURE_KEYS.status, now);
 
-        return c.json({ success: true, expires_at });
+        const item = await c.env.DB.prepare(
+            `SELECT * FROM user_statuses WHERE user_id = ? ORDER BY created_at DESC LIMIT 1`
+        ).bind(user_id).first();
+        await recordAchievementEvent(c.env.DB, {
+            userId: user_id,
+            classId: class_id,
+            eventKey: 'status_posted',
+            featureKey: FEATURE_KEYS.status,
+            referenceId: (item as any)?.id || null,
+            statusDelta: 1,
+            createdAt: now
+        });
+
+        return c.json({ success: true, expires_at, item: normalizeStatusRow(item) });
     } catch (e: any) {
         return c.json({ error: e.message }, 500);
     }
@@ -113,11 +1159,797 @@ app.post('/api/status', async (c) => {
 
 app.get('/api/status/feed', async (c) => {
     const now = Date.now();
+    const viewerUserId = c.req.query('viewer_user_id') || '';
+    const classId = c.req.query('class_id') || '';
     try {
+        const baseQuery = classId
+            ? `SELECT
+                s.id,
+                s.class_id,
+                s.status_key,
+                s.custom_text,
+                s.color_hex,
+                s.created_at,
+                COUNT(r.id) AS resonance_count,
+                MAX(CASE WHEN r.reactor_user_id = ? THEN 1 ELSE 0 END) AS reacted_by_viewer
+            FROM user_statuses s
+            LEFT JOIN user_status_reactions r ON r.status_id = s.id
+            WHERE s.expires_at > ? AND s.class_id = ?
+            GROUP BY s.id
+            ORDER BY s.created_at DESC
+            LIMIT 50`
+            : `SELECT
+                s.id,
+                s.class_id,
+                s.status_key,
+                s.custom_text,
+                s.color_hex,
+                s.created_at,
+                COUNT(r.id) AS resonance_count,
+                MAX(CASE WHEN r.reactor_user_id = ? THEN 1 ELSE 0 END) AS reacted_by_viewer
+            FROM user_statuses s
+            LEFT JOIN user_status_reactions r ON r.status_id = s.id
+            WHERE s.expires_at > ?
+            GROUP BY s.id
+            ORDER BY s.created_at DESC
+            LIMIT 50`;
+        const stmt = c.env.DB.prepare(baseQuery);
+        const { results } = classId
+            ? await stmt.bind(viewerUserId, now, classId).all()
+            : await stmt.bind(viewerUserId, now).all();
+        return c.json((results || []).map((row: any) => normalizeStatusRow(row)));
+    } catch (e: any) {
+        return c.json({ error: e.message }, 500);
+    }
+});
+
+app.post('/api/status/react', async (c) => {
+    try {
+        const { status_id, user_id } = await c.req.json();
+        if (!status_id || !user_id) {
+            return c.json({ error: 'Missing status_id or user_id' }, 400);
+        }
+
+        const targetStatus = await c.env.DB.prepare(
+            `SELECT id, user_id, class_id FROM user_statuses WHERE id = ? LIMIT 1`
+        ).bind(status_id).first<{ id: number; user_id: string; class_id: string | null }>();
+        if (!targetStatus) {
+            return c.json({ error: 'Status not found' }, 404);
+        }
+
+        const existing = await c.env.DB.prepare(
+            `SELECT id FROM user_status_reactions WHERE status_id = ? AND reactor_user_id = ? LIMIT 1`
+        ).bind(status_id, user_id).first();
+
+        let reacted = false;
+        if (existing) {
+            await c.env.DB.prepare(
+                `DELETE FROM user_status_reactions WHERE status_id = ? AND reactor_user_id = ?`
+            ).bind(status_id, user_id).run();
+        } else {
+            const reactedAt = Date.now();
+            await c.env.DB.prepare(
+                `INSERT INTO user_status_reactions (status_id, reactor_user_id, created_at) VALUES (?, ?, ?)`
+            ).bind(status_id, user_id, reactedAt).run();
+            reacted = true;
+            await recordAchievementEvent(c.env.DB, {
+                userId: user_id,
+                classId: targetStatus.class_id,
+                eventKey: 'resonance_sent',
+                featureKey: FEATURE_KEYS.status,
+                referenceId: status_id,
+                resonanceSentDelta: 1,
+                createdAt: reactedAt
+            });
+
+            if (targetStatus.user_id && targetStatus.user_id !== user_id) {
+                await recordAchievementEvent(c.env.DB, {
+                    userId: targetStatus.user_id,
+                    classId: targetStatus.class_id,
+                    eventKey: 'resonance_received',
+                    featureKey: FEATURE_KEYS.status,
+                    referenceId: status_id,
+                    resonanceReceivedDelta: 1,
+                    createdAt: reactedAt
+                });
+            }
+        }
+
+        const countRow = await c.env.DB.prepare(
+            `SELECT COUNT(*) as count FROM user_status_reactions WHERE status_id = ?`
+        ).bind(status_id).first<{ count: number | string }>();
+
+        return c.json({
+            success: true,
+            reacted,
+            resonance_count: Number(countRow?.count || 0)
+        });
+    } catch (e: any) {
+        return c.json({ error: e.message }, 500);
+    }
+});
+
+// --- PORTAL CLASS MANAGEMENT ---
+
+app.get('/api/classes', async (c) => {
+    await ensurePortalClassesSeeded(c.env.DB);
+    const { results } = await c.env.DB.prepare(
+        `SELECT class_id, faculty, default_location, sort_order, is_active, created_at
+         FROM portal_classes
+         WHERE is_active = 1
+         ORDER BY faculty ASC, sort_order ASC, class_id ASC`
+    ).all();
+    return c.json(results || []);
+});
+
+app.post('/api/classes', async (c) => {
+    try {
+        await ensurePortalClassesSeeded(c.env.DB);
+        const body = await c.req.json();
+        const classId = String(body.class_id || '').trim();
+        const faculty = String(body.faculty || 'Custom').trim() || 'Custom';
+        const defaultLocation = String(body.default_location || '').trim() || null;
+
+        if (!classId) {
+            return c.json({ error: 'Missing class_id' }, 400);
+        }
+
+        const existing = await c.env.DB.prepare(
+            `SELECT class_id FROM portal_classes WHERE class_id = ? LIMIT 1`
+        ).bind(classId).first();
+
+        if (existing) {
+            await c.env.DB.prepare(
+                `UPDATE portal_classes
+                 SET faculty = ?, default_location = ?, is_active = 1
+                 WHERE class_id = ?`
+            ).bind(faculty, defaultLocation, classId).run();
+        } else {
+            const row = await c.env.DB.prepare(
+                `SELECT COALESCE(MAX(sort_order), 0) as max_sort FROM portal_classes WHERE faculty = ?`
+            ).bind(faculty).first<{ max_sort: number | string }>();
+            const sortOrder = Number(row?.max_sort || 0) + 1;
+            await c.env.DB.prepare(
+                `INSERT INTO portal_classes (class_id, faculty, default_location, sort_order, is_active, created_at)
+                 VALUES (?, ?, ?, ?, 1, ?)`
+            ).bind(classId, faculty, defaultLocation, sortOrder, Date.now()).run();
+        }
+
+        return c.json({ success: true });
+    } catch (e: any) {
+        return c.json({ error: e.message }, 500);
+    }
+});
+
+app.delete('/api/classes/:classId', async (c) => {
+    try {
+        await ensurePortalClassesSeeded(c.env.DB);
+        const classId = decodeURIComponent(c.req.param('classId'));
+        if (!classId) return c.json({ error: 'Missing classId' }, 400);
+
+        await c.env.DB.prepare(
+            `UPDATE portal_classes SET is_active = 0 WHERE class_id = ?`
+        ).bind(classId).run();
+
+        return c.json({ success: true });
+    } catch (e: any) {
+        return c.json({ error: e.message }, 500);
+    }
+});
+
+// --- CONSOLE ANALYTICS ---
+
+app.get('/api/console/analytics', async (c) => {
+    try {
+        await ensurePortalClassesSeeded(c.env.DB);
+        await ensureAchievementTables(c.env.DB);
+        const days = Math.max(1, Math.min(30, Number(c.req.query('days') || 7)));
+        const now = Date.now();
+        const startTs = now - ((days - 1) * 24 * 60 * 60 * 1000);
+
+        const [classesResult, moodResult, statusResult, usageResult, eventCountResult, badgeResult, dailyResult] = await Promise.all([
+            c.env.DB.prepare(
+                `SELECT class_id, faculty, default_location, sort_order
+                 FROM portal_classes
+                 WHERE is_active = 1
+                 ORDER BY faculty ASC, sort_order ASC, class_id ASC`
+            ).all(),
+            c.env.DB.prepare(
+                `SELECT user_id, class_id, risk_level, created_at
+                 FROM mood_entries
+                 WHERE created_at >= ?`
+            ).bind(startTs).all(),
+            c.env.DB.prepare(
+                `SELECT user_id, class_id, created_at
+                 FROM user_statuses
+                 WHERE created_at >= ?`
+            ).bind(startTs).all(),
+            c.env.DB.prepare(
+                `SELECT user_id, class_id, feature_key, upload_count, last_uploaded_at
+                 FROM user_feature_usage`
+            ).all(),
+            c.env.DB.prepare(
+                `SELECT COUNT(*) as count FROM achievement_events`
+            ).first<{ count: number | string }>(),
+            c.env.DB.prepare(
+                `SELECT user_id, class_id, badge_key, badge_name, badge_description, badge_tier, progress_value, unlocked_at
+                 FROM user_badges
+                 ORDER BY unlocked_at DESC`
+            ).all(),
+            c.env.DB.prepare(
+                `SELECT user_id, class_id, activity_date
+                 FROM daily_user_activity
+                 ORDER BY activity_date DESC`
+            ).all()
+        ]);
+
+        const classes = (classesResult.results || []) as any[];
+        const moodRows = ((moodResult.results || []) as any[]).filter((row) => !isSyntheticAnalyticsUser(row.user_id));
+        const statusRows = ((statusResult.results || []) as any[]).filter((row) => !isSyntheticAnalyticsUser(row.user_id));
+        const usageRows = ((usageResult.results || []) as any[]).filter((row) => !isSyntheticAnalyticsUser(row.user_id));
+        const badgeRows = ((badgeResult.results || []) as any[]).filter((row) => !isSyntheticAnalyticsUser(row.user_id));
+        const dailyRows = ((dailyResult.results || []) as any[]).filter((row) => !isSyntheticAnalyticsUser(row.user_id));
+
+        const facultyMap = new Map<string, string>(classes.map((item) => [item.class_id, item.faculty]));
+        const classBreakdownMap = new Map<string, any>();
+
+        classes.forEach((item) => {
+            classBreakdownMap.set(item.class_id, {
+                class_id: item.class_id,
+                faculty: item.faculty,
+                bubbleCount: 0,
+                communityCount: 0,
+                totalCount: 0,
+                highRiskCount: 0,
+                uniqueUsers: new Set<string>()
+            });
+        });
+
+        const dailyMap = new Map<string, {
+            date: string;
+            bubbleCount: number;
+            statusCount: number;
+            bubbleUsers: Set<string>;
+            statusUsers: Set<string>;
+        }>();
+
+        for (let index = 0; index < days; index += 1) {
+            const dayStart = startTs + index * 24 * 60 * 60 * 1000;
+            const dayKey = new Date(dayStart + 8 * 60 * 60 * 1000).toISOString().split('T')[0];
+            dailyMap.set(dayKey, {
+                date: formatConsoleDayLabel(dayStart),
+                bubbleCount: 0,
+                statusCount: 0,
+                bubbleUsers: new Set<string>(),
+                statusUsers: new Set<string>()
+            });
+        }
+
+        moodRows.forEach((entry) => {
+            const dayKey = new Date(entry.created_at + 8 * 60 * 60 * 1000).toISOString().split('T')[0];
+            const dayBucket = dailyMap.get(dayKey);
+            if (dayBucket) {
+                dayBucket.bubbleCount += 1;
+                if (entry.user_id) dayBucket.bubbleUsers.add(entry.user_id);
+            }
+
+            const current = classBreakdownMap.get(entry.class_id) || {
+                class_id: entry.class_id,
+                faculty: facultyMap.get(entry.class_id) || 'Custom',
+                bubbleCount: 0,
+                communityCount: 0,
+                totalCount: 0,
+                highRiskCount: 0,
+                uniqueUsers: new Set<string>()
+            };
+            current.bubbleCount += 1;
+            current.totalCount += 1;
+            if (entry.risk_level === 'High') current.highRiskCount += 1;
+            if (entry.user_id) current.uniqueUsers.add(entry.user_id);
+            classBreakdownMap.set(entry.class_id, current);
+        });
+
+        statusRows.forEach((entry) => {
+            const dayKey = new Date(entry.created_at + 8 * 60 * 60 * 1000).toISOString().split('T')[0];
+            const dayBucket = dailyMap.get(dayKey);
+            if (dayBucket) {
+                dayBucket.statusCount += 1;
+                if (entry.user_id) dayBucket.statusUsers.add(entry.user_id);
+            }
+
+            const current = classBreakdownMap.get(entry.class_id) || {
+                class_id: entry.class_id,
+                faculty: facultyMap.get(entry.class_id) || 'Custom',
+                bubbleCount: 0,
+                communityCount: 0,
+                totalCount: 0,
+                highRiskCount: 0,
+                uniqueUsers: new Set<string>()
+            };
+            current.communityCount += 1;
+            current.totalCount += 1;
+            if (entry.user_id) current.uniqueUsers.add(entry.user_id);
+            classBreakdownMap.set(entry.class_id, current);
+        });
+
+        const fallbackBubbleUsage = Array.from(
+            moodRows.reduce((map, row) => {
+                const key = `${row.user_id}::${row.class_id}`;
+                const current = map.get(key) || {
+                    user_id: row.user_id,
+                    class_id: row.class_id,
+                    count: 0
+                };
+                current.count += 1;
+                map.set(key, current);
+                return map;
+            }, new Map<string, { user_id: string; class_id: string; count: number }>() ).values()
+        );
+
+        const fallbackStatusUsage = Array.from(
+            statusRows.reduce((map, row) => {
+                const classId = row.class_id || 'Unassigned';
+                const key = `${row.user_id}::${classId}`;
+                const current = map.get(key) || {
+                    user_id: row.user_id,
+                    class_id: classId,
+                    count: 0
+                };
+                current.count += 1;
+                map.set(key, current);
+                return map;
+            }, new Map<string, { user_id: string; class_id: string; count: number }>() ).values()
+        );
+
+        const topMoodSource = usageRows.some((row) => row.feature_key === FEATURE_KEYS.mood)
+            ? usageRows
+                .filter((row) => row.feature_key === FEATURE_KEYS.mood)
+                .map((row) => ({
+                    user_id: row.user_id,
+                    class_id: row.class_id,
+                    count: Number(row.upload_count || 0)
+                }))
+            : fallbackBubbleUsage;
+
+        const topStatusSource = usageRows.some((row) => row.feature_key === FEATURE_KEYS.status)
+            ? usageRows
+                .filter((row) => row.feature_key === FEATURE_KEYS.status)
+                .map((row) => ({
+                    user_id: row.user_id,
+                    class_id: row.class_id,
+                    count: Number(row.upload_count || 0)
+                }))
+            : fallbackStatusUsage;
+
+        const topMoodUsers = topMoodSource
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 8)
+            .map((row, index) => ({
+                rank: index + 1,
+                user_id: row.user_id,
+                class_id: row.class_id,
+                count: Number(row.count || 0)
+            }));
+
+        const topStatusUsers = topStatusSource
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 8)
+            .map((row, index) => ({
+                rank: index + 1,
+                user_id: row.user_id,
+                class_id: row.class_id,
+                count: Number(row.count || 0)
+            }));
+
+        const weeklyUsage = Array.from(dailyMap.values()).map((item) => ({
+            date: item.date,
+            bubbleCount: item.bubbleCount,
+            statusCount: item.statusCount,
+            bubbleUsers: item.bubbleUsers.size,
+            statusUsers: item.statusUsers.size
+        }));
+
+        const classBreakdown = Array.from(classBreakdownMap.values())
+            .map((item) => ({
+                class_id: item.class_id,
+                faculty: item.faculty,
+                bubbleCount: item.bubbleCount,
+                communityCount: item.communityCount,
+                totalCount: item.totalCount,
+                highRiskCount: item.highRiskCount,
+                uniqueUsers: item.uniqueUsers.size
+            }))
+            .filter((item) => item.class_id)
+            .sort((a, b) => b.totalCount - a.totalCount);
+
+        const bubbleUploads = weeklyUsage.reduce((sum, item) => sum + item.bubbleCount, 0);
+        const communityUploads = weeklyUsage.reduce((sum, item) => sum + item.statusCount, 0);
+        const featureMix = [
+            { name: '气泡反馈', value: bubbleUploads, color: '#FACC15' },
+            { name: '情绪社区', value: communityUploads, color: '#3B82F6' }
+        ];
+        const badgeCountByUser = badgeRows.reduce((map, row) => {
+            map.set(row.user_id, (map.get(row.user_id) || 0) + 1);
+            return map;
+        }, new Map<string, number>());
+        const activityDatesByUser = dailyRows.reduce((map, row) => {
+            const current = map.get(row.user_id) || {
+                user_id: row.user_id,
+                class_id: row.class_id || null,
+                dates: [] as string[]
+            };
+            current.class_id = current.class_id || row.class_id || null;
+            current.dates.push(row.activity_date);
+            map.set(row.user_id, current);
+            return map;
+        }, new Map<string, { user_id: string; class_id: string | null; dates: string[] }>());
+        const topStreaks = Array.from(activityDatesByUser.values())
+            .map((row) => {
+                const streaks = computeStreaksFromDays(row.dates);
+                return {
+                    user_id: row.user_id,
+                    class_id: row.class_id,
+                    currentStreak: streaks.currentStreak,
+                    longestStreak: streaks.longestStreak,
+                    activeDays: streaks.activeDays,
+                    totalBadges: badgeCountByUser.get(row.user_id) || 0
+                };
+            })
+            .sort((a, b) => b.currentStreak - a.currentStreak || b.longestStreak - a.longestStreak || b.activeDays - a.activeDays)
+            .slice(0, 8);
+
+        return c.json({
+            metrics: {
+                activeClasses: classes.length,
+                bubbleUploads,
+                communityUploads,
+                totalUploads: bubbleUploads + communityUploads,
+                activeUsers: new Set([
+                    ...moodRows.map((row) => row.user_id).filter(Boolean),
+                    ...statusRows.map((row) => row.user_id).filter(Boolean)
+                ]).size
+            },
+            achievements: {
+                totalEvents: Number(eventCountResult?.count || 0),
+                totalBadges: badgeRows.length,
+                usersWithBadges: new Set(badgeRows.map((row) => row.user_id).filter(Boolean)).size,
+                topCurrentStreak: topStreaks[0]?.currentStreak || 0,
+                latestUnlocks: badgeRows.slice(0, 10),
+                topStreaks
+            },
+            weeklyUsage,
+            topUsers: {
+                bubble: topMoodUsers,
+                community: topStatusUsers
+            },
+            classBreakdown,
+            featureMix
+        });
+    } catch (e: any) {
+        return c.json({ error: e.message }, 500);
+    }
+});
+
+app.get('/api/console/history', async (c) => {
+    try {
+        const feature = c.req.query('feature') || 'all';
+        const classId = c.req.query('class_id');
+        const limit = Math.max(20, Math.min(500, Number(c.req.query('limit') || 200)));
+
+        const moodPromise = (feature === 'all' || feature === FEATURE_KEYS.mood)
+            ? c.env.DB.prepare(
+                `SELECT id, user_id, class_id, created_at, location, emotion_label, risk_level, content
+                 FROM mood_entries
+                 WHERE (? IS NULL OR class_id = ?)
+                 ORDER BY created_at DESC
+                 LIMIT ?`
+            ).bind(classId || null, classId || null, limit).all()
+            : Promise.resolve({ results: [] as any[] });
+
+        const statusPromise = (feature === 'all' || feature === FEATURE_KEYS.status)
+            ? c.env.DB.prepare(
+                `SELECT id, user_id, class_id, created_at, status_key, custom_text
+                 FROM user_statuses
+                 WHERE (? IS NULL OR class_id = ?)
+                 ORDER BY created_at DESC
+                 LIMIT ?`
+            ).bind(classId || null, classId || null, limit).all()
+            : Promise.resolve({ results: [] as any[] });
+
+        const [moodResult, statusResult] = await Promise.all([moodPromise, statusPromise]);
+
+        const moodRows = ((moodResult.results || []) as any[])
+            .filter((row) => !isSyntheticAnalyticsUser(row.user_id))
+            .map((row) => ({
+                id: `mood-${row.id}`,
+                feature: FEATURE_KEYS.mood,
+                user_id: row.user_id,
+                class_id: row.class_id,
+                created_at: row.created_at,
+                location: row.location || null,
+                emotion_label: row.emotion_label || null,
+                risk_level: row.risk_level || null,
+                content: row.content || null
+            }));
+
+        const statusRows = ((statusResult.results || []) as any[])
+            .filter((row) => !isSyntheticAnalyticsUser(row.user_id))
+            .map((row) => ({
+                id: `status-${row.id}`,
+                feature: FEATURE_KEYS.status,
+                user_id: row.user_id,
+                class_id: row.class_id,
+                created_at: row.created_at,
+                status_key: normalizeStatusKey(row.status_key) || null,
+                custom_text: row.custom_text || null
+            }));
+
+        const merged = [...moodRows, ...statusRows]
+            .sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0))
+            .slice(0, limit);
+
+        return c.json(merged);
+    } catch (e: any) {
+        return c.json({ error: e.message }, 500);
+    }
+});
+
+app.get('/api/console/actual-users', async (c) => {
+    try {
+        await ensureUserPortalProgressTable(c.env.DB);
         const { results } = await c.env.DB.prepare(
-            `SELECT class_id, status_key, custom_text, color_hex, created_at FROM user_statuses WHERE expires_at > ? ORDER BY created_at DESC LIMIT 50`
-        ).bind(now).all();
-        return c.json(results);
+            `SELECT user_id, class_id, portal_key, start_seen_at, guide_completed_at, updated_at
+             FROM user_portal_progress
+             WHERE portal_key = 'student' AND guide_completed_at IS NOT NULL
+             ORDER BY guide_completed_at DESC, updated_at DESC, user_id ASC`
+        ).all();
+
+        return c.json(results || []);
+    } catch (e: any) {
+        return c.json({ error: e.message }, 500);
+    }
+});
+
+app.post('/api/console/manage/clear-actual-users', async (c) => {
+    try {
+        await ensureUserPortalProgressTable(c.env.DB);
+        const before = await c.env.DB.prepare(
+            `SELECT COUNT(*) as count FROM user_portal_progress WHERE portal_key = 'student'`
+        ).first<{ count: number | string }>();
+
+        await c.env.DB.prepare(
+            `DELETE FROM user_portal_progress WHERE portal_key = 'student'`
+        ).run();
+
+        return c.json({
+            success: true,
+            removed: Number(before?.count || 0)
+        });
+    } catch (e: any) {
+        return c.json({ error: e.message }, 500);
+    }
+});
+
+app.post('/api/console/manage/clear', async (c) => {
+    try {
+        await ensureAchievementTables(c.env.DB);
+        const body = await c.req.json();
+        const scope = body.scope === 'class' ? 'class' : 'all';
+        const classId = typeof body.class_id === 'string' ? body.class_id : null;
+
+        if (scope === 'class' && !classId) {
+            return c.json({ error: 'Missing class_id' }, 400);
+        }
+
+        if (scope === 'all') {
+            await c.env.DB.batch([
+                c.env.DB.prepare(`DELETE FROM user_status_reactions`),
+                c.env.DB.prepare(`DELETE FROM user_statuses`),
+                c.env.DB.prepare(`DELETE FROM mood_entries`),
+                c.env.DB.prepare(`DELETE FROM safety_reports`),
+                c.env.DB.prepare(`DELETE FROM ai_advice`),
+                c.env.DB.prepare(`DELETE FROM user_feature_usage`),
+                c.env.DB.prepare(`DELETE FROM achievement_events`),
+                c.env.DB.prepare(`DELETE FROM daily_user_activity`),
+                c.env.DB.prepare(`DELETE FROM user_badges`)
+            ]);
+            return c.json({ success: true, cleared: 'all' });
+        }
+
+        await c.env.DB.batch([
+            c.env.DB.prepare(`DELETE FROM user_status_reactions WHERE status_id IN (SELECT id FROM user_statuses WHERE class_id = ? )`).bind(classId),
+            c.env.DB.prepare(`DELETE FROM user_statuses WHERE class_id = ?`).bind(classId),
+            c.env.DB.prepare(`DELETE FROM mood_entries WHERE class_id = ?`).bind(classId),
+            c.env.DB.prepare(`DELETE FROM user_feature_usage WHERE class_id = ?`).bind(classId),
+            c.env.DB.prepare(`DELETE FROM ai_advice WHERE scope_id = ? OR scope_id = ? OR scope_id = ?`).bind(classId, `${classId}::en`, buildAdviceScopeId(classId, 'en')),
+            c.env.DB.prepare(`DELETE FROM achievement_events WHERE class_id = ?`).bind(classId),
+            c.env.DB.prepare(`DELETE FROM daily_user_activity WHERE class_id = ?`).bind(classId),
+            c.env.DB.prepare(`DELETE FROM user_badges WHERE class_id = ?`).bind(classId)
+        ]);
+
+        return c.json({ success: true, cleared: classId });
+    } catch (e: any) {
+        return c.json({ error: e.message }, 500);
+    }
+});
+
+app.post('/api/console/manage/inject-statuses', async (c) => {
+    try {
+        await ensurePortalClassesSeeded(c.env.DB);
+        const body = await c.req.json();
+        const scope = body.scope === 'class' ? 'class' : 'all';
+        const classId = typeof body.class_id === 'string' ? body.class_id : null;
+        const count = Math.max(1, Math.min(200, Number(body.count || 12)));
+
+        if (scope === 'class' && !classId) {
+            return c.json({ error: 'Missing class_id' }, 400);
+        }
+
+        const classRows = await c.env.DB.prepare(
+            `SELECT class_id FROM portal_classes WHERE is_active = 1 ${scope === 'class' ? 'AND class_id = ?' : ''} ORDER BY faculty ASC, sort_order ASC, class_id ASC`
+        ).bind(...(scope === 'class' ? [classId] : [])).all();
+
+        const targetClasses = ((classRows.results || []) as Array<{ class_id: string }>).map((row) => row.class_id).filter(Boolean);
+        if (!targetClasses.length) {
+            return c.json({ error: 'No target classes found' }, 400);
+        }
+
+        const now = Date.now();
+        const statusBatch = [];
+        const usageBatch = [];
+
+        for (let index = 0; index < count; index += 1) {
+            const targetClass = targetClasses[index % targetClasses.length];
+            const preset = STATUS_COMMUNITY_PRESETS[index % STATUS_COMMUNITY_PRESETS.length];
+            const createdAt = now - index * 19 * 60 * 1000;
+            const userId = buildSystemStatusUserId(targetClass, index);
+
+            statusBatch.push(
+                c.env.DB.prepare(
+                    `INSERT INTO user_statuses (user_id, class_id, status_key, custom_text, color_hex, created_at, expires_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)`
+                ).bind(
+                    userId,
+                    targetClass,
+                    preset.key,
+                    preset.text,
+                    preset.color,
+                    createdAt,
+                    createdAt + 24 * 60 * 60 * 1000
+                )
+            );
+
+            usageBatch.push(
+                c.env.DB.prepare(
+                    `INSERT INTO user_feature_usage (user_id, class_id, feature_key, upload_count, last_uploaded_at)
+                     VALUES (?, ?, ?, 1, ?)
+                     ON CONFLICT(user_id, class_id, feature_key)
+                     DO UPDATE SET upload_count = user_feature_usage.upload_count + 1, last_uploaded_at = excluded.last_uploaded_at, class_id = excluded.class_id`
+                ).bind(userId, targetClass, FEATURE_KEYS.status, createdAt)
+            );
+        }
+
+        if (statusBatch.length) await c.env.DB.batch(statusBatch);
+        if (usageBatch.length) await c.env.DB.batch(usageBatch);
+
+        return c.json({ success: true, injected: count, classes: targetClasses.length });
+    } catch (e: any) {
+        return c.json({ error: e.message }, 500);
+    }
+});
+
+app.post('/api/console/manage/clear-injected-statuses', async (c) => {
+    try {
+        const body = await c.req.json();
+        const scope = body.scope === 'class' ? 'class' : 'all';
+        const classId = typeof body.class_id === 'string' ? body.class_id : null;
+
+        if (scope === 'class' && !classId) {
+            return c.json({ error: 'Missing class_id' }, 400);
+        }
+
+        const whereClause = scope === 'class'
+            ? `user_id LIKE 'SYS-%' AND class_id = ?`
+            : `user_id LIKE 'SYS-%'`;
+
+        const statusRows = await c.env.DB.prepare(
+            `SELECT id FROM user_statuses WHERE ${whereClause}`
+        ).bind(...(scope === 'class' ? [classId] : [])).all();
+
+        const statusIds = ((statusRows.results || []) as Array<{ id: number }>).map((row) => row.id);
+        if (statusIds.length) {
+            const placeholders = statusIds.map(() => '?').join(', ');
+            await c.env.DB.prepare(
+                `DELETE FROM user_status_reactions WHERE status_id IN (${placeholders})`
+            ).bind(...statusIds).run();
+        }
+
+        await c.env.DB.batch([
+            c.env.DB.prepare(`DELETE FROM user_statuses WHERE ${whereClause}`).bind(...(scope === 'class' ? [classId] : [])),
+            c.env.DB.prepare(
+                `DELETE FROM user_feature_usage
+                 WHERE feature_key = ? AND user_id LIKE 'SYS-%' ${scope === 'class' ? 'AND class_id = ?' : ''}`
+            ).bind(...(scope === 'class' ? [FEATURE_KEYS.status, classId] : [FEATURE_KEYS.status]))
+        ]);
+
+        return c.json({ success: true, removed: statusIds.length });
+    } catch (e: any) {
+        return c.json({ error: e.message }, 500);
+    }
+});
+
+app.get('/api/console/manage/backup', async (c) => {
+    try {
+        await ensurePortalClassesSeeded(c.env.DB);
+        await ensureAchievementTables(c.env.DB);
+        await ensureUserPortalProgressTable(c.env.DB);
+        const scope = c.req.query('scope') === 'class' ? 'class' : 'all';
+        const classId = c.req.query('class_id');
+        const params = scope === 'class' ? [classId, classId] : [];
+
+        if (scope === 'class' && !classId) {
+            return c.json({ error: 'Missing class_id' }, 400);
+        }
+
+        const [classesResult, moodResult, statusResult, usageResult, adviceResult, eventResult, dailyResult, badgeResult, progressResult] = await Promise.all([
+            c.env.DB.prepare(
+                `SELECT class_id, faculty, default_location, sort_order, is_active, created_at
+                 FROM portal_classes
+                 WHERE is_active = 1 ${scope === 'class' ? 'AND class_id = ?' : ''}
+                 ORDER BY faculty ASC, sort_order ASC, class_id ASC`
+            ).bind(...(scope === 'class' ? [classId] : [])).all(),
+            c.env.DB.prepare(
+                `SELECT * FROM mood_entries WHERE ${scope === 'class' ? 'class_id = ?' : '1=1'} ORDER BY created_at DESC`
+            ).bind(...(scope === 'class' ? [classId] : [])).all(),
+            c.env.DB.prepare(
+                `SELECT * FROM user_statuses WHERE ${scope === 'class' ? 'class_id = ?' : '1=1'} ORDER BY created_at DESC`
+            ).bind(...(scope === 'class' ? [classId] : [])).all(),
+            c.env.DB.prepare(
+                `SELECT * FROM user_feature_usage WHERE ${scope === 'class' ? 'class_id = ?' : '1=1'} ORDER BY last_uploaded_at DESC`
+            ).bind(...(scope === 'class' ? [classId] : [])).all(),
+            c.env.DB.prepare(
+                `SELECT * FROM ai_advice WHERE ${scope === 'class' ? '(scope_id = ? OR scope_id = ?)' : '1=1'} ORDER BY created_at DESC`
+            ).bind(...(scope === 'class' ? [classId, `${classId}::en`] : [])).all()
+            ,
+            c.env.DB.prepare(
+                `SELECT * FROM achievement_events WHERE ${scope === 'class' ? 'class_id = ?' : '1=1'} ORDER BY created_at DESC`
+            ).bind(...(scope === 'class' ? [classId] : [])).all(),
+            c.env.DB.prepare(
+                `SELECT * FROM daily_user_activity WHERE ${scope === 'class' ? 'class_id = ?' : '1=1'} ORDER BY activity_date DESC`
+            ).bind(...(scope === 'class' ? [classId] : [])).all(),
+            c.env.DB.prepare(
+                `SELECT * FROM user_badges WHERE ${scope === 'class' ? 'class_id = ?' : '1=1'} ORDER BY unlocked_at DESC`
+            ).bind(...(scope === 'class' ? [classId] : [])).all(),
+            c.env.DB.prepare(
+                `SELECT * FROM user_portal_progress WHERE portal_key = 'student' AND ${scope === 'class' ? 'class_id = ?' : '1=1'} ORDER BY guide_completed_at DESC, updated_at DESC`
+            ).bind(...(scope === 'class' ? [classId] : [])).all()
+        ]);
+
+        return c.json({
+            exported_at: Date.now(),
+            scope,
+            class_id: scope === 'class' ? classId : null,
+            counts: {
+                classes: (classesResult.results || []).length,
+                mood_entries: (moodResult.results || []).length,
+                user_statuses: (statusResult.results || []).length,
+                user_feature_usage: (usageResult.results || []).length,
+                ai_advice: (adviceResult.results || []).length,
+                achievement_events: (eventResult.results || []).length,
+                daily_user_activity: (dailyResult.results || []).length,
+                user_badges: (badgeResult.results || []).length,
+                user_portal_progress: (progressResult.results || []).length
+            },
+            classes: classesResult.results || [],
+            mood_entries: moodResult.results || [],
+            user_statuses: statusResult.results || [],
+            user_feature_usage: usageResult.results || [],
+            ai_advice: adviceResult.results || [],
+            achievement_events: eventResult.results || [],
+            daily_user_activity: dailyResult.results || [],
+            user_badges: badgeResult.results || [],
+            user_portal_progress: progressResult.results || []
+        });
     } catch (e: any) {
         return c.json({ error: e.message }, 500);
     }
@@ -300,32 +2132,43 @@ async function callGeminiAI(apiKey: string, systemPrompt: string, userPrompt: st
 app.get('/api/teacher/advice', async (c) => {
     const class_id = c.req.query('class_id') || 'Unknown';
     const dateQuery = c.req.query('date');
-    // Use UTC+8 for date consistency
-    const now = new Date();
-    const beijingTime = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+    const forceRefresh = c.req.query('force') === '1';
+    const responseLang = c.req.query('lang') === 'en' ? 'en' : 'zh';
+    const wantsEnglish = responseLang === 'en';
+    const shouldRestore = c.req.query('restore') === '1';
+    const adviceScopeId = buildAdviceScopeId(class_id, responseLang);
+    const beijingTime = getBeijingNow();
     const today = beijingTime.toISOString().split('T')[0];
     const targetDate = dateQuery || today;
+    const timeContext = getTimeContextLabel(beijingTime);
 
     try {
-
-        // 1. Check DB for existing advice
         const existing: any = await c.env.DB.prepare(
             `SELECT * FROM ai_advice WHERE target_role = 'Teacher' AND scope_id = ? AND date_str = ?`
-        ).bind(class_id, targetDate).first();
+        ).bind(adviceScopeId, targetDate).first();
 
-        if (existing) {
+        const isFresh = existing && (Date.now() - (existing.created_at || 0) < AI_ADVICE_REFRESH_MS);
+
+        if (existing && (!forceRefresh || targetDate !== today) && (targetDate !== today || isFresh)) {
+            const { results: existingEntries } = await c.env.DB.prepare(
+                `SELECT class_id, location FROM mood_entries WHERE class_id = ? ORDER BY created_at DESC LIMIT 50`
+            ).bind(class_id).all();
+            const existingRegistry = createAliasRegistry(
+                [class_id],
+                (existingEntries as any[]).map((entry) => entry.location || '')
+            );
             return c.json({
                 id: existing.id,
-                advice: existing.content,
+                advice: stripMarkdownFormatting(shouldRestore ? existingRegistry.restoreAliasedTerms(existing.content) : existing.content),
                 checked_indices: JSON.parse(existing.checked_indices || '[]'),
                 date: existing.date_str,
-                source: 'db'
+                source: 'db',
+                refreshed_at: existing.created_at || null
             });
         }
 
-        // If querying past date and not found
         if (targetDate !== today) {
-            return c.json({ error: "No advice recorded for this date." });
+            return c.json({ error: wantsEnglish ? "No advice recorded for this date." : "No advice recorded for this date." });
         }
 
         // --- Generate New Advice ---
@@ -334,24 +2177,13 @@ app.get('/api/teacher/advice', async (c) => {
         ).bind(class_id).all();
 
         if (!entries || entries.length === 0) {
-            return c.json({ advice: "暂无足够数据生成建议。请等待更多学生登记情绪后再试。" });
+            return c.json({ advice: wantsEnglish ? "Not enough data yet to generate advice. Please wait for more student check-ins." : "暂无足够数据生成建议。请等待更多学生登记情绪后再试。" });
         }
 
         const typedEntries = entries as any[];
 
-        // Analyze data
-        const total = typedEntries.length;
-        const negatives = typedEntries.filter(e => e.mood_score <= 2).length;
-        const positives = typedEntries.filter(e => e.mood_score >= 4).length;
-        const risks = typedEntries.filter(e => e.risk_level === 'High').length;
-
-        const emotionCounts: Record<string, number> = {};
-        typedEntries.forEach(e => {
-            emotionCounts[e.emotion_label] = (emotionCounts[e.emotion_label] || 0) + 1;
-        });
-        const mainEmotion = Object.entries(emotionCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'Unknown';
-
-        const summary = `班级 ${class_id} 共有 ${total} 条近期记录。${positives} 位学生情绪积极，${negatives} 位学生情绪消极，${risks} 条高风险警报。主要情绪是"${mainEmotion}"。`;
+        const teacherContext = summarizeTeacherEntries(typedEntries, class_id);
+        const { summary, metrics, sanitizedScope, aliasRegistry } = teacherContext;
 
         // @ts-ignore
         const apiKey = c.env.GEMINI_API_KEY;
@@ -359,38 +2191,69 @@ app.get('/api/teacher/advice', async (c) => {
         let adviceContent = "";
 
         if (!apiKey) {
-            adviceContent = `【模拟AI建议】\n\n根据 ${total} 条记录分析，班级主要情绪为"${mainEmotion}"。\n\n• 建议组织一次团队活动增强凝聚力\n• ${negatives} 位同学情绪低落，可考虑减轻本周作业量\n• 关注 ${risks} 条高风险警报，必要时进行一对一沟通`;
+            adviceContent = wantsEnglish
+                ? `Class Snapshot\n${metrics.total} samples this period, ${metrics.negative} negative entries, and ${metrics.risk} high-risk entries.\n\nAction Suggestions\n• Let the homeroom teacher run a low-pressure emotional check-in during the next class meeting to confirm whether the fluctuation is continuing.\n• Ask the counselor to screen high-risk records today and arrange private follow-up without naming students publicly.\n• Let subject teachers reduce or clarify the most frequent pressure sources during this week.\n• Ask the grade team to discuss only trends and aliases during the next review, not individual identities.`
+                : `【班级情绪概况】\n${timeContext}样本 ${metrics.total} 条，消极 ${metrics.negative} 条，高风险 ${metrics.risk} 条。\n\n【行动建议】\n• 由班主任在本周最近一次班会先做低压力情绪签到，确认波动是否持续\n• 由心理老师在今天内筛查高风险相关记录并安排私下跟进，不在公开场景点名\n• 由任课老师在本周内对高频压力来源相关任务做一次减负或说明澄清\n• 由年级组在下次复盘时只讨论趋势和代号，不讨论个体身份`;
         } else {
             try {
-                const systemPrompt = `你是一位专业的教育心理学家，擅长分析学生情绪数据并为班主任提供具体、可操作的建议。请用中文回答，保持专业但友好的语气。`;
-                const userPrompt = `以下是班级的近期情绪数据摘要：\n\n${summary}\n\n请为班主任提供 3-5 条具体、可操作的建议，帮助改善班级整体情绪健康。每条建议应该：\n1. 简洁明了（不超过30字）\n2. 可立即执行\n3. 针对当前数据特点\n\n请用项目符号列表格式输出。`;
+                const systemPrompt = wantsEnglish
+                    ? `You are a school mental-health support advisor. You only receive anonymized aggregate statistics. Never request, infer, or reveal any real school name, class name, location name, student identity, direct quote, or information that could re-identify a person.
+
+Output requirements:
+1. Respond in English.
+2. Start with a short "Class Snapshot" no longer than 30 words.
+3. Then write "Action Suggestions" and give 4 plain-text lines.
+4. Each bullet must include: what to do, who should do it, and when to do it.
+5. Keep the suggestions realistic and executable within a school today or this week.
+6. Do not make medical diagnoses.
+7. Do not quote raw text or reveal real class or area names; only use anonymized aliases from the input if needed.`
+                    : `你是一位校园心理支持顾问。你只接收已经脱敏的聚合统计数据，禁止要求、推测或输出任何真实学校名称、班级名称、地点名称、学生身份信息、引号内原话或可逆向定位个体的信息。
+
+输出要求：
+1. 用中文回答。
+2. 必须先写一个不超过40字的【班级情绪概况】。
+3. 再写【行动建议】并给出4条纯文本建议。
+4. 每条建议都要包含：做什么、谁来做、何时做。
+5. 建议必须具体、现实、可在校园里当天或本周执行。
+6. 不做心理诊断，不使用“患有”“确诊”等医学判断。
+7. 不引用任何原始文本，不输出真实班级/区域名称；如果需要指代，只能使用输入中的脱敏代号。
+8. 输出纯文本，不使用 Markdown、星号项目符号、井号标题或加粗标记。`;
+                const userPrompt = wantsEnglish
+                    ? `Here is the anonymized summary for ${sanitizedScope} during ${timeContext}:\n\n${summary}\n\nPlease provide a truly actionable checklist for the homeroom teacher. Prioritize high-risk records, sustained low-score trends, and repeated stress sources. The actions should be realistic for a school to carry out during ${timeContext}.`
+                    : `以下是 ${sanitizedScope} 在${timeContext}的脱敏摘要：\n\n${summary}\n\n请基于这些数据给班主任一份真正可执行的建议清单。优先处理：高风险记录、持续低分趋势、重复出现的压力来源。建议要符合${timeContext}能实际落地的校园动作。`;
 
                 adviceContent = await callGeminiAI(apiKey, systemPrompt, userPrompt);
+                adviceContent = aliasRegistry.replaceSensitiveTerms(stripMarkdownFormatting(adviceContent));
             } catch (e: any) {
                 console.error('AI Service Error:', e);
-                adviceContent = "AI生成暂时不可用，请稍后重试。";
+                adviceContent = wantsEnglish ? "AI generation is temporarily unavailable. Please try again later." : "AI生成暂时不可用，请稍后重试。";
             }
         }
 
-        // Save to DB
-        // Save to DB and get ID
-        const result: any = await c.env.DB.prepare(
-            `INSERT INTO ai_advice (target_role, scope_id, content, checked_indices, date_str, created_at) VALUES (?, ?, ?, ?, ?, ?) RETURNING id`
-        ).bind('Teacher', class_id, adviceContent, '[]', today, Date.now()).first();
-
-        const newId = result?.id;
+        let newId = existing?.id;
+        if (existing) {
+            await c.env.DB.prepare(
+                `UPDATE ai_advice SET content = ?, checked_indices = ?, created_at = ? WHERE id = ?`
+            ).bind(adviceContent, '[]', Date.now(), existing.id).run();
+        } else {
+            const result: any = await c.env.DB.prepare(
+                `INSERT INTO ai_advice (target_role, scope_id, content, checked_indices, date_str, created_at) VALUES (?, ?, ?, ?, ?, ?) RETURNING id`
+            ).bind('Teacher', adviceScopeId, adviceContent, '[]', today, Date.now()).first();
+            newId = result?.id;
+        }
 
         return c.json({
             id: newId,
-            advice: adviceContent,
+            advice: stripMarkdownFormatting(shouldRestore ? aliasRegistry.restoreAliasedTerms(adviceContent) : adviceContent),
             checked_indices: [],
             date: today,
-            source: 'generated'
+            source: forceRefresh ? 'refreshed' : 'generated',
+            refreshed_at: Date.now()
         });
 
     } catch (e: any) {
         console.error('Advice Error:', e);
-        return c.json({ advice: "获取建议时发生错误。" });
+        return c.json({ advice: wantsEnglish ? "An error occurred while fetching the advice." : "获取建议时发生错误。" });
     }
 });
 
@@ -407,10 +2270,18 @@ app.post('/api/advice/check', async (c) => {
 app.get('/api/advice/history', async (c) => {
     const role = c.req.query('role') || 'Teacher';
     const scope_id = c.req.query('scope_id') || 'Unknown';
-    const { results } = await c.env.DB.prepare(
-        `SELECT date_str FROM ai_advice WHERE target_role = ? AND scope_id = ? ORDER BY date_str DESC LIMIT 30`
-    ).bind(role, scope_id).all();
-    return c.json(results.map((r: any) => r.date_str));
+    const responseLang = c.req.query('lang') === 'en' ? 'en' : 'zh';
+    const adviceScopeId = buildAdviceScopeId(scope_id, responseLang);
+
+    try {
+        const { results } = await c.env.DB.prepare(
+            `SELECT date_str FROM ai_advice WHERE target_role = ? AND scope_id = ? ORDER BY date_str DESC LIMIT 30`
+        ).bind(role, adviceScopeId).all();
+        return c.json((results || []).map((r: any) => r.date_str));
+    } catch (e) {
+        console.error('Advice history error:', e);
+        return c.json([]);
+    }
 });
 
 
@@ -418,6 +2289,7 @@ app.get('/api/advice/history', async (c) => {
 app.get('/api/report/weekly', async (c) => {
     const role = c.req.query('role') || 'Teacher';
     const scope_id = c.req.query('scope_id') || 'Unknown';
+    const shouldRestore = c.req.query('restore') === '1';
 
     // Calculate This Week's Monday (Beijing Time)
     const now = new Date();
@@ -509,6 +2381,23 @@ app.get('/api/report/weekly', async (c) => {
         fullMark: 5
     })).sort((a, b) => a.score - b.score).slice(0, 6); // Top 6 concern areas
 
+    const reportAliasRegistry = createAliasRegistry(
+        filteredEntries.map((entry) => entry.class_id || ''),
+        filteredEntries.map((entry) => entry.location || '')
+    );
+
+    const safeCategoryStats = categoryStats.map((item) => ({
+        ...item,
+        subject: reportAliasRegistry.replaceSensitiveTerms(item.subject)
+    }));
+
+    const visibleCategoryStats = shouldRestore
+        ? safeCategoryStats.map((item) => ({
+            ...item,
+            subject: reportAliasRegistry.restoreAliasedTerms(item.subject)
+        }))
+        : safeCategoryStats;
+
     // 5. AI Summary
     // @ts-ignore
     const apiKey = c.env.GEMINI_API_KEY;
@@ -516,25 +2405,28 @@ app.get('/api/report/weekly', async (c) => {
 
     if (apiKey && filteredEntries.length > 0) {
         try {
-            const prompt = `基于以下周报数据（仅周一至周五，忽略周末）生成简短的决策提示（100字内）：
-            - 角色：${role}
-            - 本周趋势（周一至周五）：${trend.map(t => t.score).join(', ')}
-            - 最低分区域/类别：${categoryStats.map(c => c.subject).join(', ')}
+            const prompt = `以下是已经脱敏的周报数据（仅周一至周五，忽略周末）：
+            - 角色：${role === 'Teacher' ? '班级视角' : '全校视角'}
+            - 本周趋势：${trend.map(t => `${t.date}:${t.score}`).join('，')}
+            - 低分重点对象：${safeCategoryStats.map(c => c.subject).join('，')}
             - 整体消极占比：${Math.round(negative / filteredEntries.length * 100)}%
-            
-            请给出针对性建议，比如“周三情绪低谷需关注”或“xx区域需加强疏导”。`;
 
-            aiSummary = await callGeminiAI(apiKey, "你是一位学校数据分析助手。", prompt);
+            请生成 100 字以内的中文决策提示，禁止输出真实班级、地点、学校名称，只能使用脱敏代号。`;
+
+            aiSummary = await callGeminiAI(apiKey, "你是一位学校数据分析助手，只能基于脱敏汇总给出趋势判断，不得输出身份信息。输出纯文本，不使用 Markdown、星号项目符号、井号标题或加粗标记。", prompt);
+            aiSummary = reportAliasRegistry.replaceSensitiveTerms(stripMarkdownFormatting(aiSummary));
         } catch (e) { console.error(e); }
     } else if (filteredEntries.length === 0) {
         aiSummary = "本周（周一至周五）暂无数据记录，无法生成分析。";
     }
 
+    const visibleSummary = stripMarkdownFormatting(shouldRestore ? reportAliasRegistry.restoreAliasedTerms(aiSummary) : aiSummary);
+
     return c.json({
         trend,
         composition,
-        categoryStats,
-        aiSummary,
+        categoryStats: visibleCategoryStats,
+        aiSummary: visibleSummary,
         total: filteredEntries.length,
         risk: filteredEntries.filter(e => e.risk_level === 'High').length
     });
@@ -543,129 +2435,132 @@ app.get('/api/report/weekly', async (c) => {
 // Admin Advice Endpoint - School-wide analysis
 app.get('/api/admin/advice', async (c) => {
     const dateQuery = c.req.query('date');
-    const now = new Date();
-    const beijingTime = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+    const forceRefresh = c.req.query('force') === '1';
+    const responseLang = c.req.query('lang') === 'en' ? 'en' : 'zh';
+    const wantsEnglish = responseLang === 'en';
+    const shouldRestore = c.req.query('restore') === '1';
+    const adviceScopeId = buildAdviceScopeId('All', responseLang);
+    const beijingTime = getBeijingNow();
     const today = beijingTime.toISOString().split('T')[0];
     const targetDate = dateQuery || today;
+    const timeContext = getTimeContextLabel(beijingTime);
 
-    // 1. Check DB for existing advice
-    const existing: any = await c.env.DB.prepare(
-        `SELECT * FROM ai_advice WHERE target_role = 'Admin' AND scope_id = 'All' AND date_str = ?`
-    ).bind(targetDate).first();
+    try {
+        const existing: any = await c.env.DB.prepare(
+            `SELECT * FROM ai_advice WHERE target_role = 'Admin' AND scope_id = ? AND date_str = ?`
+        ).bind(adviceScopeId, targetDate).first();
 
-    if (existing) {
-        return c.json({
-            id: existing.id,
-            advice: existing.content,
-            checked_indices: JSON.parse(existing.checked_indices || '[]'),
-            date: existing.date_str,
-            source: 'db'
-        });
-    }
+        const isFresh = existing && (Date.now() - (existing.created_at || 0) < AI_ADVICE_REFRESH_MS);
 
-    if (targetDate !== today) {
-        return c.json({ error: "No advice recorded for this date." });
-    }
-
-    // Get all recent entries
-    const { results: entries } = await c.env.DB.prepare(
-        `SELECT * FROM mood_entries ORDER BY created_at DESC LIMIT 200`
-    ).all();
-
-    if (!entries || entries.length === 0) {
-        return c.json({ advice: "暂无足够数据生成建议。系统需要更多学生数据才能进行分析。" });
-    }
-
-    const typedEntries = entries as any[];
-
-    // Aggregate by location
-    const locationStats: Record<string, { total: number; negative: number; risk: number }> = {};
-    typedEntries.forEach(e => {
-        const loc = e.location || 'Unknown';
-        if (!locationStats[loc]) locationStats[loc] = { total: 0, negative: 0, risk: 0 };
-        locationStats[loc].total++;
-        if (e.mood_score <= 2) locationStats[loc].negative++;
-        if (e.risk_level === 'High') locationStats[loc].risk++;
-    });
-
-    // Aggregate by class
-    const classStats: Record<string, { total: number; negative: number; risk: number }> = {};
-    typedEntries.forEach(e => {
-        const cls = e.class_id || 'Unknown';
-        if (!classStats[cls]) classStats[cls] = { total: 0, negative: 0, risk: 0 };
-        classStats[cls].total++;
-        if (e.mood_score <= 2) classStats[cls].negative++;
-        if (e.risk_level === 'High') classStats[cls].risk++;
-    });
-
-    // Find problem areas
-    const total = typedEntries.length;
-    const totalNegative = typedEntries.filter(e => e.mood_score <= 2).length;
-    const totalRisk = typedEntries.filter(e => e.risk_level === 'High').length;
-
-    const locationSummary = Object.entries(locationStats)
-        .map(([loc, stats]) => `${loc}: ${stats.total}条记录, ${stats.negative}消极, ${stats.risk}高风险`)
-        .join('\n');
-
-    const topProblemClasses = Object.entries(classStats)
-        .filter(([_, stats]) => stats.total >= 3)
-        .sort((a, b) => (b[1].negative / b[1].total) - (a[1].negative / a[1].total))
-        .slice(0, 5)
-        .map(([cls, stats]) => `${cls}: ${Math.round(stats.negative / stats.total * 100)}%消极率`)
-        .join(', ');
-
-    const summary = `全校共有 ${total} 条近期记录。整体消极情绪占比 ${Math.round(totalNegative / total * 100)}%，共 ${totalRisk} 条高风险警报。
-
-按区域分布：
-${locationSummary}
-
-消极率较高的班级：${topProblemClasses || '暂无'}`;
-
-    const apiKey = c.env.GEMINI_API_KEY;
-
-    let adviceContent = "";
-
-    if (!apiKey) {
-        adviceContent = `【全校情绪概况】\n本周共采集 ${total} 条数据，整体消极率 ${Math.round(totalNegative / total * 100)}%。高风险警报 ${totalRisk} 条，主要集中在 ${topProblemClasses.split(',')[0] || 'Unknown'}。\n\n【战略行动建议】\n• 立即启动针对高风险区域的心理干预小组\n• 在下周一晨会通报积极班级，树立榜样\n• 建议对初三/高三学生增加减压活动预算\n• 检查高风险区域（如${(topProblemClasses.split(',')[0] || '').split(':')[0]}）的硬件安全设施`;
-    } else {
-        try {
-            const systemPrompt = `你是一位康奈尔大学毕业的资深教育心理学家兼学校管理顾问，擅长数据驱动的决策支持。你的任务是根据学校情绪数据，提供一份简报。
-            
-            结构要求：
-            1. 【全校情绪概况】：用一两句话总结当前数据亮点和痛点（50字以内）。
-            2. 【战略行动建议】：提供 3-4 条具体的行动建议。每条建议必须包含“做什么”和“预期效果”。
-
-            语气要求：专业、果断、有同理心。`;
-
-            const userPrompt = `数据摘要：
-            - 总记录：${total}
-            - 高风险警报：${totalRisk}
-            - 整体消极率：${Math.round(totalNegative / total * 100)}%
-            - 区域分布详情：\n${locationSummary}
-            - 重点关注班级：${topProblemClasses}
-
-            请生成简报。建议要非常具体，例如“在xx区域增加巡逻”、“为xx年级调整作息”等。`;
-
-            const advice = await callGeminiAI(apiKey, systemPrompt, userPrompt);
-            adviceContent = advice;
-        } catch (e: any) {
-            console.error('AI Service Error:', e);
-            adviceContent = "AI生成暂时不可用，请稍后重试。";
+        if (existing && (!forceRefresh || targetDate !== today) && (targetDate !== today || isFresh)) {
+            const { results: existingEntries } = await c.env.DB.prepare(
+                `SELECT class_id, location FROM mood_entries ORDER BY created_at DESC LIMIT 200`
+            ).all();
+            const existingRegistry = createAliasRegistry(
+                (existingEntries as any[]).map((entry) => entry.class_id || ''),
+                (existingEntries as any[]).map((entry) => entry.location || '')
+            );
+            return c.json({
+                id: existing.id,
+                advice: stripMarkdownFormatting(shouldRestore ? existingRegistry.restoreAliasedTerms(existing.content) : existing.content),
+                checked_indices: JSON.parse(existing.checked_indices || '[]'),
+                date: existing.date_str,
+                source: 'db',
+                refreshed_at: existing.created_at || null
+            });
         }
+
+        if (targetDate !== today) {
+            return c.json({ error: wantsEnglish ? "No advice recorded for this date." : "No advice recorded for this date." });
+        }
+
+        // Get all recent entries
+        const { results: entries } = await c.env.DB.prepare(
+            `SELECT * FROM mood_entries ORDER BY created_at DESC LIMIT 200`
+        ).all();
+
+        if (!entries || entries.length === 0) {
+            return c.json({ advice: wantsEnglish ? "Not enough data yet to generate advice. The system needs more student records for analysis." : "暂无足够数据生成建议。系统需要更多学生数据才能进行分析。" });
+        }
+
+        const typedEntries = entries as any[];
+
+        const adminContext = summarizeAdminEntries(typedEntries);
+        const { summary, metrics, aliasRegistry } = adminContext;
+
+        const apiKey = c.env.GEMINI_API_KEY;
+
+        let adviceContent = "";
+
+        if (!apiKey) {
+            adviceContent = wantsEnglish
+                ? `School Snapshot\n${metrics.total} samples this period, ${metrics.negative} negative entries, and ${metrics.risk} high-risk entries.\n\nStrategic Actions\n• Ask the discipline or duty team to observe the anonymized hotspot areas with the highest risk concentration today.\n• Let the grade leadership review class groups with sustained high negative rates within this week.\n• Have the counseling center publish one shared response plan for the most common stress sources rather than letting each class improvise.\n• Ensure leadership reports only trends and aliases externally, never real class or location names.`
+                : `【全校情绪概况】\n${timeContext}样本 ${metrics.total} 条，消极 ${metrics.negative} 条，高风险 ${metrics.risk} 条。\n\n【战略行动建议】\n• 由德育或值班团队在今天优先覆盖高风险最集中的脱敏区域做现场观察\n• 由年级组在本周内对连续消极率偏高的班级组做一次专项复盘\n• 由心理中心在本周统一输出针对共性压力来源的减压动作，避免各班自行摸索\n• 由管理层对外汇报时只呈现趋势和代号，不呈现真实班级与地点`;
+        } else {
+            try {
+                const systemPrompt = wantsEnglish
+                    ? `You are a school management decision advisor. You receive only anonymized school-wide aggregate data and may only provide trend-based management actions.
+
+Output requirements:
+1. Respond in English.
+2. Start with a "School Snapshot" no longer than 35 words.
+3. Then write "Strategic Actions" and give 4 plain-text lines.
+4. Each bullet must include: action, responsible role, timing, and expected effect.
+5. The suggestions should be immediately usable by school leaders, discipline staff, counselors, or grade teams.
+6. Never reveal real school, class, location, student information, or raw text.
+7. If you need to reference targets, only use anonymized aliases from the input.
+8. Output plain text only. Do not use Markdown, asterisks, hash headings, or bold markers.`
+                : `你是一位学校管理决策顾问。你拿到的是已经脱敏的全校聚合数据，只能基于趋势做管理建议。
+
+输出要求：
+1. 用中文回答。
+2. 先写一个不超过50字的【全校情绪概况】。
+3. 再写【战略行动建议】并给出4条纯文本建议。
+4. 每条建议都要包含：动作、责任角色、执行时点、预期效果。
+5. 建议要能被校长、德育、心理、年级组立即采用。
+6. 禁止输出真实学校名、班级名、地点名、学生信息或原始文本。
+7. 如果需要指代对象，只能使用脱敏代号。
+8. 输出纯文本，不使用 Markdown、星号项目符号、井号标题或加粗标记。`;
+
+                const userPrompt = wantsEnglish
+                    ? `Here is the anonymized school-wide summary for ${timeContext}:\n\n${summary}\n\nPlease produce a truly actionable school-level brief. Prioritize high-risk hotspots, sustained negative trends, and issues that require cross-team coordination. The actions should be realistic for ${timeContext}.`
+                    : `以下是全校在${timeContext}的脱敏摘要：\n\n${summary}\n\n请输出一份真正可执行的校级简报，优先处理：高风险点位、连续性消极趋势、需要跨部门协同的问题。建议要符合${timeContext}能立即安排的管理动作。`;
+
+                adviceContent = await callGeminiAI(apiKey, systemPrompt, userPrompt);
+                adviceContent = aliasRegistry.replaceSensitiveTerms(stripMarkdownFormatting(adviceContent));
+            } catch (e: any) {
+                console.error('AI Service Error:', e);
+                adviceContent = wantsEnglish ? "AI generation is temporarily unavailable. Please try again later." : "AI生成暂时不可用，请稍后重试。";
+            }
+        }
+
+        let resultId = existing?.id;
+        if (existing) {
+            await c.env.DB.prepare(
+                `UPDATE ai_advice SET content = ?, checked_indices = ?, created_at = ? WHERE id = ?`
+            ).bind(adviceContent, '[]', Date.now(), existing.id).run();
+        } else {
+            const result: any = await c.env.DB.prepare(
+                `INSERT INTO ai_advice (target_role, scope_id, content, checked_indices, date_str, created_at) VALUES (?, ?, ?, ?, ?, ?) RETURNING id`
+            ).bind('Admin', adviceScopeId, adviceContent, '[]', today, Date.now()).first();
+            resultId = result?.id;
+        }
+
+        return c.json({
+            id: resultId,
+            advice: stripMarkdownFormatting(shouldRestore ? aliasRegistry.restoreAliasedTerms(adviceContent) : adviceContent),
+            checked_indices: [],
+            date: today,
+            source: forceRefresh ? 'refreshed' : 'generated',
+            refreshed_at: Date.now()
+        });
+    } catch (e) {
+        console.error('Admin advice error:', e);
+        return c.json({
+            error: wantsEnglish ? "Failed to load admin advice." : "获取管理端建议失败。",
+            advice: wantsEnglish ? "AI generation is temporarily unavailable. Please try again later." : "AI生成暂时不可用，请稍后重试。"
+        }, 500);
     }
-
-    // Save to DB and get ID (Run for both Mock and Real AI)
-    const result: any = await c.env.DB.prepare(
-        `INSERT INTO ai_advice (target_role, scope_id, content, checked_indices, date_str, created_at) VALUES (?, ?, ?, ?, ?, ?) RETURNING id`
-    ).bind('Admin', 'All', adviceContent, '[]', today, Date.now()).first();
-
-    return c.json({
-        id: result?.id,
-        advice: adviceContent,
-        checked_indices: [],
-        date: today,
-        source: 'generated'
-    });
 });
 
 
@@ -770,6 +2665,7 @@ app.get('/api/logs/search', async (c) => {
 // --- DEMO GENERATOR ---
 app.post('/api/demo/generate', async (c) => {
     const { count, target_class } = await c.req.json();
+    await ensurePortalClassesSeeded(c.env.DB);
     const SCHOOL_DATA = {
         CNC: { classes: ["初一一班", "初一二班", "初一三班", "初二一班", "初二二班", "初三一班", "初三二班"], loc: "AQ1" },
         AA: {
@@ -781,6 +2677,7 @@ app.post('/api/demo/generate', async (c) => {
 
     const stmt = c.env.DB.prepare(`INSERT INTO mood_entries (user_id, role, class_id, mood_score, emotion_label, mood_color, content, location, risk_level, category, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     const batch = [];
+    const usageBatch = [];
 
     // Beijing Time Helper: get timestamp for recent Mon-Fri
     const getRecentWeekday = () => {
@@ -810,9 +2707,10 @@ app.post('/api/demo/generate', async (c) => {
 
         const category = CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)];
         const created_at = getRecentWeekday(); // Enforce Mon-Fri
+        const userId = '#' + Math.floor(1000 + Math.random() * 9000);
 
         batch.push(stmt.bind(
-            '#' + Math.floor(1000 + Math.random() * 9000),
+            userId,
             'Student',
             class_id,
             emotion.score,
@@ -824,6 +2722,13 @@ app.post('/api/demo/generate', async (c) => {
             category,
             created_at
         ));
+
+        usageBatch.push(c.env.DB.prepare(
+            `INSERT INTO user_feature_usage (user_id, class_id, feature_key, upload_count, last_uploaded_at)
+             VALUES (?, ?, ?, 1, ?)
+             ON CONFLICT(user_id, class_id, feature_key)
+             DO UPDATE SET upload_count = user_feature_usage.upload_count + 1, last_uploaded_at = excluded.last_uploaded_at, class_id = excluded.class_id`
+        ).bind(userId, class_id, FEATURE_KEYS.mood, created_at));
     }
 
     // D1 Batch Execution for Mood Entries
@@ -867,20 +2772,36 @@ app.post('/api/demo/generate', async (c) => {
             Date.now() - Math.floor(Math.random() * 24 * 60 * 60 * 1000), // Within 24h
             Date.now() + 24 * 60 * 60 * 1000
         ));
+
+        usageBatch.push(c.env.DB.prepare(
+            `INSERT INTO user_feature_usage (user_id, class_id, feature_key, upload_count, last_uploaded_at)
+             VALUES (?, ?, ?, 1, ?)
+             ON CONFLICT(user_id, class_id, feature_key)
+             DO UPDATE SET upload_count = user_feature_usage.upload_count + 1, last_uploaded_at = excluded.last_uploaded_at, class_id = excluded.class_id`
+        ).bind(userId, class_id, FEATURE_KEYS.status, Date.now()));
     }
 
     if (statusBatch.length > 0) {
         await c.env.DB.batch(statusBatch);
+    }
+    if (usageBatch.length > 0) {
+        await c.env.DB.batch(usageBatch);
     }
 
     return c.json({ success: true, message: `Generated ${count} entries and ${statusCount} statuses.` });
 });
 
 app.post('/api/demo/clear', async (c) => {
+    await ensureAchievementTables(c.env.DB);
     await c.env.DB.prepare(`DELETE FROM mood_entries`).run();
     await c.env.DB.prepare(`DELETE FROM safety_reports`).run();
     await c.env.DB.prepare(`DELETE FROM ai_advice`).run();
     await c.env.DB.prepare(`DELETE FROM user_statuses`).run();
+    await c.env.DB.prepare(`DELETE FROM user_status_reactions`).run();
+    await c.env.DB.prepare(`DELETE FROM user_feature_usage`).run();
+    await c.env.DB.prepare(`DELETE FROM achievement_events`).run();
+    await c.env.DB.prepare(`DELETE FROM daily_user_activity`).run();
+    await c.env.DB.prepare(`DELETE FROM user_badges`).run();
     return c.json({ success: true, message: "Cleared all data." });
 });
 

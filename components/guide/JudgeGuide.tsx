@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronRight, MousePointer2, User, LayoutDashboard, X } from 'lucide-react';
+import { useDemoI18n } from '../DemoLanguageContext';
 
 interface JudgeGuideProps {
     currentView: 'student' | 'teacher' | 'admin' | string;
@@ -77,8 +78,22 @@ const STEPS = [
 ];
 
 export const JudgeGuide: React.FC<JudgeGuideProps> = ({ currentView, onNavigate }) => {
+    const { isEnglish } = useDemoI18n();
     const [active, setActive] = useState(false);
     const [currentStepIndex, setCurrentStepIndex] = useState(0);
+    const steps = isEnglish
+        ? [
+            { id: 'welcome', title: 'Welcome to MindLink', content: 'Welcome. This guide walks you through the core experience of our Liquid Empathy system. Feel free to interact with the interface.', targetView: 'student', action: 'Start' },
+            { id: 'student_intro', title: 'Stop 1: Student View', content: 'This is the everyday student interface. The core idea is zero-friction input. The liquid bubbles represent a student’s current emotional state.', targetView: 'student', action: 'Next' },
+            { id: 'interaction_tap', title: 'Microinteraction: Tap', content: 'Try tapping a bubble. It changes the emotional color instantly, but does not submit yet, letting students explore the feeling first.', targetView: 'student', action: 'Next' },
+            { id: 'interaction_hold', title: 'Microinteraction: Long Press', content: 'Now press and hold a bubble for about one second to submit. This avoids accidental touches and creates a brief mindful moment.', targetView: 'student', action: 'Next' },
+            { id: 'community_intro', title: 'Emotion Community', content: 'Scroll downward to see the emotion community. Students can share anonymous status moments and gentle preset expressions to support one another.', targetView: 'student', action: 'Next' },
+            { id: 'go_teacher', title: 'Switch Role: Teacher', content: 'Next, view the teacher perspective. Use the control center and switch to the Teacher portal.', targetView: 'student', action: 'Waiting...', waitFor: 'teacher' },
+            { id: 'teacher_view', title: 'Stop 2: Teacher Dashboard', content: 'Here you can see the live emotional grid for a class. Notice the AI advice panel on the right, acting like an always-on school counselor.', targetView: 'teacher', action: 'Next' },
+            { id: 'go_admin', title: 'Switch Role: Admin', content: 'Finally, let’s move to the school-wide perspective. Switch to the Admin portal.', targetView: 'teacher', action: 'Waiting...', waitFor: 'admin' },
+            { id: 'admin_view', title: 'Final Stop: Admin Dashboard', content: 'The admin view aggregates the whole school. It highlights hotspots, spatial risk, and strategic recommendations for intervention.', targetView: 'admin', action: 'Finish' }
+        ]
+        : STEPS;
 
     useEffect(() => {
         const done = localStorage.getItem('mindlink_guide_completed');
@@ -88,7 +103,7 @@ export const JudgeGuide: React.FC<JudgeGuideProps> = ({ currentView, onNavigate 
     // Auto-advance when view changes matches expectation
     useEffect(() => {
         if (!active) return;
-        const step = STEPS[currentStepIndex];
+        const step = steps[currentStepIndex];
 
         if (step.id === 'go_teacher' && currentView === 'teacher') {
             setCurrentStepIndex(prev => prev + 1);
@@ -100,7 +115,7 @@ export const JudgeGuide: React.FC<JudgeGuideProps> = ({ currentView, onNavigate 
 
 
     const handleNext = () => {
-        if (currentStepIndex < STEPS.length - 1) {
+        if (currentStepIndex < steps.length - 1) {
             setCurrentStepIndex(prev => prev + 1);
         } else {
             finishGuide();
@@ -123,14 +138,14 @@ export const JudgeGuide: React.FC<JudgeGuideProps> = ({ currentView, onNavigate 
             <button
                 onClick={resetGuide}
                 className="fixed bottom-6 left-6 z-[60] p-3 bg-white/80 backdrop-blur-md rounded-full shadow-md text-sm font-semibold text-indigo-600 hover:scale-105 transition-all"
-                title="重新开始向导"
+                title={isEnglish ? 'Restart Guide' : '重新开始向导'}
             >
-                向导
+                {isEnglish ? 'Guide' : '向导'}
             </button>
         );
     }
 
-    const step = STEPS[currentStepIndex];
+    const step = steps[currentStepIndex];
     // @ts-ignore
     const isWaiting = step.waitFor && currentView !== step.waitFor;
 
@@ -165,14 +180,14 @@ export const JudgeGuide: React.FC<JudgeGuideProps> = ({ currentView, onNavigate 
                             onClick={finishGuide}
                             className="text-slate-400 hover:text-slate-600 transition-colors"
                         >
-                            <span className="sr-only">关闭</span>
+                            <span className="sr-only">{isEnglish ? 'Close' : '关闭'}</span>
                             <X size={16} />
                         </button>
                     </div>
 
                     <div className="mt-4 flex items-center justify-between">
                         <div className="flex gap-1">
-                            {STEPS.map((_, idx) => (
+                            {steps.map((_, idx) => (
                                 <div
                                     key={idx}
                                     className={`h-1 rounded-full transition-all duration-300 ${idx === currentStepIndex ? 'w-4 bg-indigo-500' : 'w-1 bg-slate-200'}`}
@@ -190,7 +205,7 @@ export const JudgeGuide: React.FC<JudgeGuideProps> = ({ currentView, onNavigate 
                             </button>
                         ) : (
                             <span className="text-xs font-semibold text-indigo-500 animate-pulse px-2 py-1 bg-indigo-50 rounded-md">
-                                请切换视图以继续...
+                                {isEnglish ? 'Switch views to continue...' : '请切换视图以继续...'}
                             </span>
                         )}
                     </div>

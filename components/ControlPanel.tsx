@@ -4,8 +4,10 @@ import { Database, Trash2, AlertOctagon, RefreshCw, Power, Zap, School } from 'l
 import { GlassCard } from './GlassCard';
 import { motion } from 'framer-motion';
 import { SCHOOL_STRUCTURE } from './SchoolStructure';
+import { useDemoI18n } from './DemoLanguageContext';
 
 export const ControlPanel: React.FC = () => {
+  const { t } = useDemoI18n();
   const [activeBtn, setActiveBtn] = useState<string | null>(null);
   const [selectedFaculty, setSelectedFaculty] = useState<string>('CNC');
   const [selectedClass, setSelectedClass] = useState<string>(SCHOOL_STRUCTURE.CNC.classes[0]);
@@ -28,7 +30,7 @@ export const ControlPanel: React.FC = () => {
   };
 
   const handleClear = async () => {
-    if (window.confirm("确定要清空所有模拟数据吗？")) {
+    if (window.confirm(t("确定要清空所有模拟数据吗？", "Are you sure you want to clear all demo data?"))) {
       await api.demo.clearData();
       window.location.reload();
     }
@@ -37,8 +39,8 @@ export const ControlPanel: React.FC = () => {
   return (
     <div className="max-w-3xl mx-auto animate-in slide-in-from-bottom-8 pb-32 md:pb-0 pt-12 md:pt-0">
       <div className="mb-8 text-center">
-        <h2 className="text-3xl font-bold text-slate-800 tracking-tight mb-2">控制中心</h2>
-        <p className="text-slate-500 font-medium">模拟控制与系统诊断</p>
+        <h2 className="text-3xl font-bold text-slate-800 tracking-tight mb-2">{t('控制中心', 'Control Center')}</h2>
+        <p className="text-slate-500 font-medium">{t('模拟控制与系统诊断', 'Demo controls and system diagnostics')}</p>
       </div>
 
       <div className="flex flex-wrap justify-center gap-4 mb-8">
@@ -83,8 +85,8 @@ export const ControlPanel: React.FC = () => {
             <Database size={24} />
           </div>
           <div className="text-center">
-            <span className="block text-sm font-bold">注入到 {selectedClass}</span>
-            <span className={`text-[10px] uppercase font-bold tracking-wider ${activeBtn === 'gen10' ? 'text-indigo-100' : 'text-slate-400'}`}>+10 条记录</span>
+            <span className="block text-sm font-bold">{t(`注入到 ${selectedClass}`, `Inject into ${selectedClass}`)}</span>
+            <span className={`text-[10px] uppercase font-bold tracking-wider ${activeBtn === 'gen10' ? 'text-indigo-100' : 'text-slate-400'}`}>{t('+10 条记录', '+10 records')}</span>
           </div>
         </motion.button>
 
@@ -99,8 +101,8 @@ export const ControlPanel: React.FC = () => {
             <RefreshCw size={24} className={activeBtn === 'gen50' ? 'animate-spin' : ''} />
           </div>
           <div className="text-center">
-            <span className="block text-sm font-bold">全天数据</span>
-            <span className={`text-[10px] uppercase font-bold tracking-wider ${activeBtn === 'gen50' ? 'text-purple-100' : 'text-slate-400'}`}>模拟</span>
+            <span className="block text-sm font-bold">{t('全天数据', 'Full-day data')}</span>
+            <span className={`text-[10px] uppercase font-bold tracking-wider ${activeBtn === 'gen50' ? 'text-purple-100' : 'text-slate-400'}`}>{t('模拟', 'simulate')}</span>
           </div>
         </motion.button>
 
@@ -115,8 +117,8 @@ export const ControlPanel: React.FC = () => {
             <School size={24} />
           </div>
           <div className="text-center">
-            <span className="block text-sm font-bold">模拟全校</span>
-            <span className={`text-[10px] uppercase font-bold tracking-wider ${activeBtn === 'genAll' ? 'text-orange-100' : 'text-slate-400'}`}>+200 条</span>
+            <span className="block text-sm font-bold">{t('模拟全校', 'Whole-school demo')}</span>
+            <span className={`text-[10px] uppercase font-bold tracking-wider ${activeBtn === 'genAll' ? 'text-orange-100' : 'text-slate-400'}`}>{t('+200 条', '+200')}</span>
           </div>
         </motion.button>
 
@@ -130,8 +132,8 @@ export const ControlPanel: React.FC = () => {
             <Trash2 size={24} />
           </div>
           <div className="text-center">
-            <span className="block text-sm font-bold text-slate-800 group-hover:text-red-600 transition-colors">重置</span>
-            <span className="text-[10px] text-slate-500 font-medium">清空数据</span>
+            <span className="block text-sm font-bold text-slate-800 group-hover:text-red-600 transition-colors">{t('重置', 'Reset')}</span>
+            <span className="text-[10px] text-slate-500 font-medium">{t('清空数据', 'Clear data')}</span>
           </div>
         </motion.button>
 
@@ -141,10 +143,9 @@ export const ControlPanel: React.FC = () => {
             <AlertOctagon size={24} />
           </div>
           <div>
-            <h4 className="font-bold text-slate-800">模拟逻辑</h4>
+            <h4 className="font-bold text-slate-800">{t('模拟逻辑', 'Demo Logic')}</h4>
             <p className="text-sm text-slate-500 font-medium leading-relaxed">
-              生成器会触发 10% 的“高风险”事件以测试警报系统。
-              数据重置将在刷新页面后生效。
+              {t('生成器会触发 10% 的“高风险”事件以测试警报系统。数据重置将在刷新页面后生效。', 'The generator injects about 10% high-risk events to test the alerting flow. Data reset takes effect after the page reloads.')}
             </p>
           </div>
         </GlassCard>

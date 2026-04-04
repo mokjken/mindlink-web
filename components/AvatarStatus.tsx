@@ -5,8 +5,24 @@ import { StatusSelector } from './StatusSelector';
 import { useUserStatus } from '../hooks/useUserStatus';
 import { useToast } from './ToastProvider';
 import { StatusPreset } from './StatusPresets';
+import { getStudentClassId } from '../services/api';
+import { useDemoI18n } from './DemoLanguageContext';
+
+const STATUS_LABEL_EN: Record<string, string> = {
+    recharging: 'Recharging',
+    focus: 'Focused',
+    ranking: 'Gaming',
+    sleeping: 'Sleeping',
+    crushing: 'Little Joy',
+    vibing: 'Music',
+    gym: 'Workout',
+    exploring: 'Exploring',
+    relaxing: 'Relaxing',
+    fire: 'On Fire'
+};
 
 export const AvatarStatus: React.FC = () => {
+    const { isEnglish, t } = useDemoI18n();
     const { status, updateStatus } = useUserStatus();
     const { showToast } = useToast();
     const [isPickerOpen, setIsPickerOpen] = useState(false);
@@ -14,11 +30,11 @@ export const AvatarStatus: React.FC = () => {
     const handleSetStatus = async (preset: StatusPreset, customText: string) => {
         setIsPickerOpen(false);
         try {
-            const classId = localStorage.getItem('mindlink_class_id') || '3-A';
+            const classId = getStudentClassId() || '3-A';
             await updateStatus(preset.key, customText, preset.color, classId);
-            showToast("状态已更新！", "success");
+            showToast(t("状态已更新！", "Status updated!"), "success");
         } catch (e) {
-            showToast("更新失败", "error");
+            showToast(t("更新失败", "Update failed"), "error");
         }
     };
 
@@ -48,14 +64,14 @@ export const AvatarStatus: React.FC = () => {
 
                 {/* Status Label or placeholder */}
                 <div className="flex flex-col items-start leading-none gap-0.5">
-                    <span className="text-xs font-bold text-slate-800">学生</span>
+                    <span className="text-xs font-bold text-slate-800">{t('学生', 'Student')}</span>
                     {status ? (
                         <span className="text-[10px] font-bold text-slate-500 flex items-center gap-1 opacity-80">
-                            {status.custom_text || status.status_key}
+                            {status.custom_text || (isEnglish ? STATUS_LABEL_EN[status.status_key] || status.status_key : status.status_key)}
                         </span>
                     ) : (
                         <span className="text-[10px] text-slate-400 font-medium flex items-center gap-1">
-                            设定状态 <Plus size={8} />
+                            {t('设定状态', 'Set status')} <Plus size={8} />
                         </span>
                     )}
                 </div>

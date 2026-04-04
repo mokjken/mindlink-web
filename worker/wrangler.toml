@@ -5,7 +5,18 @@ compatibility_date = "2024-04-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "mindlink-db"
-database_id = "84fc5da2-779d-467f-8ff2-fb92b9acf45e" # Users replace this with their generated D1 database ID
+database_id = "REPLACE_WITH_PRODUCTION_DATABASE_ID"
 
 [observability]
+enabled = true
+
+[env.demo]
+name = "mindlink-demo-backend"
+
+[[env.demo.d1_databases]]
+binding = "DB"
+database_name = "mindlink-demo-db"
+database_id = "REPLACE_WITH_DEMO_DATABASE_ID"
+
+[env.demo.observability]
 enabled = true

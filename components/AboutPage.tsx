@@ -1,8 +1,10 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { Github, ExternalLink, Heart } from 'lucide-react';
+import { useDemoI18n } from './DemoLanguageContext';
 
 export const AboutPage: React.FC = () => {
+    const { t, isEnglish } = useDemoI18n();
     return (
         <div className="w-full max-w-4xl mx-auto p-4 sm:p-6 pb-24 space-y-8 h-full min-h-[80vh] flex flex-col justify-center">
 
@@ -16,7 +18,7 @@ export const AboutPage: React.FC = () => {
                 </div>
                 <h1 className="text-4xl md:text-5xl font-black text-slate-800 tracking-tight">MindLink</h1>
                 <p className="text-lg text-slate-500 max-w-2xl mx-auto">
-                    A real-time student emotion and mental health tracking platform designed for K-12 educational environments.
+                    {t('一个面向 K-12 教育场景的实时学生情绪与心理健康追踪平台。', 'A real-time student emotion and mental health tracking platform designed for K-12 educational environments.')}
                 </p>
             </motion.div>
 
@@ -26,9 +28,9 @@ export const AboutPage: React.FC = () => {
                 transition={{ delay: 0.1 }}
                 className="bg-white/80 backdrop-blur-2xl border border-white/40 shadow-xl shadow-slate-200/50 rounded-3xl p-6 md:p-10 text-center max-w-2xl mx-auto w-full"
             >
-                <h2 className="text-2xl font-bold text-slate-800 mb-6">Open Source Repository</h2>
+                <h2 className="text-2xl font-bold text-slate-800 mb-6">{t('开源仓库', 'Open Source Repository')}</h2>
                 <p className="text-slate-600 mb-8 leading-relaxed">
-                    MindLink is fully open-source. Discover the codebase, infrastructure setup, and Serverless deployment instructions on our GitHub repository.
+                    {t('MindLink 已完全开源。你可以在 GitHub 仓库中查看代码结构、基础设施配置与 Serverless 部署说明。', 'MindLink is fully open-source. Discover the codebase, infrastructure setup, and Serverless deployment instructions on our GitHub repository.')}
                 </p>
 
                 <a
@@ -49,7 +51,7 @@ export const AboutPage: React.FC = () => {
                 transition={{ delay: 0.2 }}
                 className="text-center text-sm text-slate-400 font-medium"
             >
-                Powered by Cloudflare Workers & Google Gemini
+                {isEnglish ? 'Powered by Cloudflare Workers & Google Gemini' : '由 Cloudflare Workers 与 Google Gemini 驱动'}
             </motion.div>
         </div>
     );

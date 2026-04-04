@@ -2,31 +2,73 @@ import React from 'react';
 import { ShieldAlert, Github, HeartHandshake, Settings, School, GraduationCap } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AvatarStatus } from './AvatarStatus';
+import { useDemoI18n } from './DemoLanguageContext';
 
 interface LayoutProps {
   children: React.ReactNode;
   activeTab: string;
   onTabChange: (tab: string) => void;
+  availableTabs?: string[];
+  showAvatar?: boolean;
 }
 
-export const Layout: React.FC<LayoutProps> = ({ children, activeTab, onTabChange }) => {
+export const Layout: React.FC<LayoutProps> = ({
+  children,
+  activeTab,
+  onTabChange,
+  availableTabs,
+  showAvatar = true
+}) => {
+  const { isDemo, isEnglish, setLanguage, t } = useDemoI18n();
   const navItems = [
-    { id: 'student', label: '学生端', icon: HeartHandshake },
-    { id: 'teacher', label: '教师端', icon: GraduationCap },
-    { id: 'admin', label: '管理端', icon: School },
-    { id: 'demo', label: '演示', icon: Settings },
-    { id: 'specs', label: '关于项目', icon: Github },
+    { id: 'student', label: t('学生端', 'Student'), icon: HeartHandshake },
+    { id: 'teacher', label: t('教师端', 'Teacher'), icon: GraduationCap },
+    { id: 'admin', label: t('管理端', 'Admin'), icon: School },
+    { id: 'demo', label: t('演示', 'Demo'), icon: Settings },
+    { id: 'specs', label: t('关于项目', 'About'), icon: Github },
   ];
+  const visibleNavItems = availableTabs
+    ? navItems.filter((item) => availableTabs.includes(item.id))
+    : navItems;
+  const isDedicatedPortal = visibleNavItems.length <= 1;
+  const mainClassName = isDedicatedPortal
+    ? 'max-w-[1520px] px-3 pt-3 pb-6 md:px-6 md:pt-5 md:pb-8'
+    : 'max-w-[1400px] px-4 pt-[90px] pb-[100px] md:pt-[120px] md:pb-12';
 
   return (
     <div className="flex flex-col min-h-screen font-sans selection:bg-indigo-500/20 relative z-10 pointer-events-none">
+      {isDemo && (
+        <div className="fixed top-4 right-4 md:top-6 md:right-6 z-[140] pointer-events-auto">
+          <div className="inline-flex items-center rounded-full border border-white/70 bg-white/82 p-1 shadow-lg shadow-slate-900/5 backdrop-blur-2xl">
+            <button
+              type="button"
+              onClick={() => setLanguage('zh')}
+              className={`rounded-full px-3 py-1.5 text-[11px] font-semibold tracking-[0.14em] transition-colors ${
+                !isEnglish ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              中文
+            </button>
+            <button
+              type="button"
+              onClick={() => setLanguage('en')}
+              className={`rounded-full px-3 py-1.5 text-[11px] font-semibold tracking-[0.14em] transition-colors ${
+                isEnglish ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              EN
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 
         ========================================
         TABLET / DESKTOP HEADER (Hidden on mobile)
         ========================================
       */}
-      <div className="hidden md:flex fixed top-6 w-full z-[100] pointer-events-auto justify-center px-4">
+      {!isDedicatedPortal && (
+        <div className="hidden md:flex fixed top-6 w-full z-[100] pointer-events-auto justify-center px-4">
         <motion.nav
           initial={{ y: -50, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
@@ -40,7 +82,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, onTabChange
 
           {/* Scrollable Tabs Wrapper (Saves layout if screen is too thin like 800px iPad) */}
           <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide px-2">
-            {navItems.map((item) => {
+            {visibleNavItems.map((item) => {
               const isActive = activeTab === item.id;
               return (
                 <button
@@ -58,37 +100,45 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, onTabChange
             })}
           </div>
 
-          <div className="w-px h-8 bg-slate-200/60 mx-2 flex-shrink-0"></div>
-
-          {/* Avatar on Right side of Pill */}
-          <div className="flex-shrink-0 pr-1">
-            <AvatarStatus />
-          </div>
+          {showAvatar && (
+            <>
+              <div className="w-px h-8 bg-slate-200/60 mx-2 flex-shrink-0"></div>
+              <div className="flex-shrink-0 pr-1">
+                <AvatarStatus />
+              </div>
+            </>
+          )}
         </motion.nav>
-      </div>
+        </div>
+      )}
 
       {/* 
         ========================================
         MOBILE HEADER (Hidden on tablet/desktop)
         ========================================
       */}
-      <div className="md:hidden fixed top-0 w-full z-[100] pb-8 pt-4 px-4 bg-gradient-to-b from-white/90 to-transparent pointer-events-auto flex items-center justify-between">
+      {!isDedicatedPortal && (
+        <div className="md:hidden fixed top-0 w-full z-[100] pb-8 pt-4 px-4 bg-gradient-to-b from-white/90 to-transparent pointer-events-auto flex items-center justify-between">
         <div className="w-10 h-10 bg-slate-900 rounded-full flex items-center justify-center text-white shadow-lg border border-white/20">
           <ShieldAlert size={20} />
         </div>
-        <div className="scale-90 origin-top-right">
-          <AvatarStatus />
+        {showAvatar && (
+          <div className="scale-90 origin-top-right">
+            <AvatarStatus />
+          </div>
+        )}
         </div>
-      </div>
+      )}
 
       {/* 
         ========================================
         MOBILE BOTTOM TAB BAR (Hidden on tablet/desktop)
         ========================================
       */}
-      <div className="md:hidden fixed bottom-0 left-0 w-full z-[100] pointer-events-auto bg-white/95 backdrop-blur-2xl border-t border-slate-200/50 shadow-[0_-10px_40px_rgba(0,0,0,0.05)] pb-[calc(env(safe-area-inset-bottom)+5px)] pt-1">
+      {!isDedicatedPortal && (
+        <div className="md:hidden fixed bottom-0 left-0 w-full z-[100] pointer-events-auto bg-white/95 backdrop-blur-2xl border-t border-slate-200/50 shadow-[0_-10px_40px_rgba(0,0,0,0.05)] pb-[calc(env(safe-area-inset-bottom)+5px)] pt-1">
         <div className="flex w-full overflow-x-auto px-2 py-3 gap-2 scrollbar-hide items-center justify-start">
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const isActive = activeTab === item.id;
             return (
               <button
@@ -102,14 +152,17 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, onTabChange
             );
           })}
         </div>
-      </div>
+        </div>
+      )}
 
       {/* 
         ========================================
         MAIN CONTENT AREA
         ========================================
       */}
-      <main className="flex-1 w-full max-w-[1400px] mx-auto px-4 pt-[90px] pb-[100px] md:pt-[120px] md:pb-12 relative z-0 pointer-events-auto">
+      <main
+        className={`flex-1 w-full mx-auto relative z-0 pointer-events-auto ${mainClassName}`}
+      >
         {children}
       </main>
     </div>

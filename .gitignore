@@ -33,3 +33,8 @@ worker/.wrangler/
 .env.*
 !.env.example
 worker/.dev.vars
+
+# Local databases / runtime state
+backend/*.db
+backend/*.sqlite
+backend/*.sqlite3
